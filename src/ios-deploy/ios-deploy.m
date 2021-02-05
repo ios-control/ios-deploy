@@ -160,6 +160,20 @@ const int exitcode_app_crash = 254;
         }                                                                       \
     } while (false);
 
+// Checks for MobileDevice.framework errors and tries to print them.
+#define log_error(call)                                                       \
+    do {                                                                        \
+        unsigned int err = (unsigned int)call;                                  \
+        if (err != 0)                                                           \
+        {                                                                       \
+            const char* msg = get_error_message(err);                           \
+            NSString *description = msg ? [NSString stringWithUTF8String:msg] : @"unknown."; \
+            NSLogJSON(@{@"Event": @"Error", @"Code": @(err), @"Status": description}); \
+            log_on_error(@"Error 0x%x: %@ " #call, err, description);               \
+        }                                                                       \
+    } while (false);
+
+
 
 void disable_ssl(ServiceConnRef con)
 {
@@ -173,6 +187,18 @@ void disable_ssl(ServiceConnRef con)
 
     SSL_free(con->sslContext);
     con->sslContext = NULL;
+}
+
+void log_on_error(NSString* format, ...)
+{
+    va_list valist;
+    va_start(valist, format);
+    NSString* str = [[[NSString alloc] initWithFormat:format arguments:valist] autorelease];
+    va_end(valist);
+
+    if (!_json_output) {
+        NSLog(@"[ !! ] %@", str);
+    }
 }
 
 
@@ -2060,7 +2086,7 @@ void rmtree_callback(AFCConnectionRef conn, const char *name, read_dir_cb_reason
 {
     if (reason == READ_DIR_FILE || reason == READ_DIR_AFTER_DIR) {
         NSLogVerbose(@"Deleting %s", name);
-        check_error(AFCRemovePath(conn, name));
+        log_error(AFCRemovePath(conn, name));
     } else if (reason == READ_DIR_FIFO) {
         NSLogVerbose(@"Skipping %s", name);
     }
