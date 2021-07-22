@@ -94,6 +94,7 @@ int AMDServiceConnectionSend(ServiceConnRef con, const void * data, size_t size)
 int AMDServiceConnectionReceive(ServiceConnRef con, void * data, size_t size);
 
 bool found_device = false, debug = false, verbose = false, unbuffered = false, nostart = false, debugserver_only = false, detect_only = false, install = true, uninstall = false, no_wifi = false;
+bool faster_path_search = false;
 bool command_only = false;
 char *command = NULL;
 char const*target_filename = NULL;
@@ -257,22 +258,34 @@ CFStringRef copy_find_path(CFStringRef rootPath, CFStringRef namePattern) {
 
     if( !path_exists(rootPath) )
         return NULL;
-    
-    if (CFStringFind(namePattern, CFSTR("*"), 0).location == kCFNotFound) {
-        //No wildcards. Let's speed up the search
-        CFStringRef path = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@/%@"), rootPath, namePattern);
-        
-        if( path_exists(path) )
-            return path;
-        
-        CFRelease(path);
-        return NULL;
+
+    if (faster_path_search) {
+        CFIndex maxdepth = 1;
+        CFArrayRef findPathSlash = CFStringCreateArrayWithFindResults(NULL, namePattern, CFSTR("/"), CFRangeMake(0, CFStringGetLength(namePattern)), 0);
+        if (findPathSlash != NULL) {
+            maxdepth = CFArrayGetCount(findPathSlash) + 1;
+            CFRelease(findPathSlash);
+        }
+
+        cf_command = CFStringCreateWithFormat(NULL, NULL, CFSTR("find '%@' -path '%@/%@' -maxdepth %ld 2>/dev/null | sort | tail -n 1"), rootPath, rootPath, namePattern, maxdepth);
     }
-    
-    if (CFStringFind(namePattern, CFSTR("/"), 0).location == kCFNotFound) {
-        cf_command = CFStringCreateWithFormat(NULL, NULL, CFSTR("find '%@' -name '%@' -maxdepth 1 2>/dev/null | sort | tail -n 1"), rootPath, namePattern);
-    } else {
-        cf_command = CFStringCreateWithFormat(NULL, NULL, CFSTR("find '%@' -path '%@/%@' 2>/dev/null | sort | tail -n 1"), rootPath, rootPath, namePattern);
+    else {
+        if (CFStringFind(namePattern, CFSTR("*"), 0).location == kCFNotFound) {
+            //No wildcards. Let's speed up the search
+            CFStringRef path = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@/%@"), rootPath, namePattern);
+            
+            if( path_exists(path) )
+                return path;
+            
+            CFRelease(path);
+            return NULL;
+        }
+        
+        if (CFStringFind(namePattern, CFSTR("/"), 0).location == kCFNotFound) {
+            cf_command = CFStringCreateWithFormat(NULL, NULL, CFSTR("find '%@' -name '%@' -maxdepth 1 2>/dev/null | sort | tail -n 1"), rootPath, namePattern);
+        } else {
+            cf_command = CFStringCreateWithFormat(NULL, NULL, CFSTR("find '%@' -path '%@/%@' 2>/dev/null | sort | tail -n 1"), rootPath, rootPath, namePattern);
+        }
     }
 
     char command[1024] = { '\0' };
@@ -2374,6 +2387,7 @@ void usage(const char* app) {
         @"  -k, --key                    keys for the properties of the bundle. Joined by ',' and used only with -B <list_bundle_id> and -j <json> \n"
         @"  --custom-script <script>     path to custom python script to execute in lldb\n"
         @"  --custom-command <command>   specify additional lldb commands to execute\n",
+        @"  --faster-path-search         use alternative logic to find the device support paths faster\n",
         [NSString stringWithUTF8String:app]);
 }
 
@@ -2432,6 +2446,7 @@ int main(int argc, char *argv[]) {
         { "key", optional_argument, NULL, 'k' },
         { "custom-script", required_argument, NULL, 1001},
         { "custom-command", required_argument, NULL, 1002},
+        { "faster-path-search", no_argument, NULL, 1003},
         { NULL, 0, NULL, 0 },
     };
     int ch;
@@ -2581,6 +2596,9 @@ int main(int argc, char *argv[]) {
                 custom_commands = [[NSMutableString alloc] init];
             }
             [custom_commands appendFormat:@"%s\n", optarg];
+            break;
+        case 1003:
+            faster_path_search = true;
             break;
         case 'k':
             if (!keys) keys = [[NSMutableArray alloc] init];
