@@ -1523,7 +1523,7 @@ CFStringRef copy_bundle_id(CFURLRef app_url)
     return bundle_id;
 }
 
-typedef enum { READ_DIR_FILE, READ_DIR_BEFORE_DIR, READ_DIR_AFTER_DIR } read_dir_cb_reason;
+typedef enum { READ_DIR_FILE, READ_DIR_FIFO, READ_DIR_BEFORE_DIR, READ_DIR_AFTER_DIR } read_dir_cb_reason;
 
 void read_dir(AFCConnectionRef afc_conn_p, const char* dir,
               void(*callback)(AFCConnectionRef conn, const char *dir, read_dir_cb_reason reason))
@@ -1584,7 +1584,7 @@ void read_dir(AFCConnectionRef afc_conn_p, const char* dir,
     }
     
     if (not_dir) {
-        if (callback) (*callback)(afc_conn_p, dir, READ_DIR_FILE);
+        if (callback) (*callback)(afc_conn_p, dir, is_fifo ? READ_DIR_FIFO : READ_DIR_FILE);
         return;
     }
 
@@ -1736,7 +1736,7 @@ void* read_file_to_memory(char const * path, size_t* file_size)
 
 void list_files_callback(AFCConnectionRef conn, const char *name, read_dir_cb_reason reason)
 {
-    if (reason == READ_DIR_FILE) {
+    if (reason == READ_DIR_FILE || reason == READ_DIR_FIFO) {
         NSLogOut(@"%@", [NSString stringWithUTF8String:name]);
     } else if (reason == READ_DIR_BEFORE_DIR) {
         NSLogOut(@"%@/", [NSString stringWithUTF8String:name]);
@@ -1854,7 +1854,7 @@ void copy_file_callback(AFCConnectionRef afc_conn_p, const char *name, read_dir_
 
     if (*local_name=='\0') return;
 
-    if (reason == READ_DIR_FILE) {
+    if (reason == READ_DIR_FILE || reason == READ_DIR_FIFO) {
         NSLogOut(@"%@", [NSString stringWithUTF8String:name]);
         afc_file_ref fref;
         int err = AFCFileRefOpen(afc_conn_p,name,1,&fref);
@@ -2061,6 +2061,8 @@ void rmtree_callback(AFCConnectionRef conn, const char *name, read_dir_cb_reason
     if (reason == READ_DIR_FILE || reason == READ_DIR_AFTER_DIR) {
         NSLogVerbose(@"Deleting %s", name);
         check_error(AFCRemovePath(conn, name));
+    } else if (reason == READ_DIR_FIFO) {
+        NSLogVerbose(@"Skipping %s", name);
     }
 }
 
