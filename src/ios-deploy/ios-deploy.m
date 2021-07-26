@@ -1533,6 +1533,7 @@ void read_dir(AFCConnectionRef afc_conn_p, const char* dir,
     afc_dictionary* afc_dict_p;
     char *key, *val;
     int not_dir = 0;
+    bool is_fifo = 0;
 
     unsigned int code = AFCFileInfoOpen(afc_conn_p, dir, &afc_dict_p);
     if (code != 0) {
@@ -1549,6 +1550,7 @@ void read_dir(AFCConnectionRef afc_conn_p, const char* dir,
     while((AFCKeyValueRead(afc_dict_p,&key,&val) == 0) && key && val) {
         if (strcmp(key,"st_ifmt")==0) {
             not_dir = strcmp(val,"S_IFDIR");
+            is_fifo = !strcmp(val, "S_IFIFO");
             if (_json_output) {
                 ifmt = [NSString stringWithUTF8String:val];
             } else {
