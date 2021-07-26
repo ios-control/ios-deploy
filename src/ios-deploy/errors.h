@@ -511,9 +511,14 @@ const int error_id_to_message_count = sizeof(error_id_to_message) / sizeof(error
 const char* get_error_message(unsigned int error) {
 	const char* id = NULL;
 
+	// this creates an error code to match what's defined in `errorcode_to_id`;
+	// taken from https://github.com/samdmarshall/SDMMobileDevice/blob/c3e1e97b1310c7a7a10f68281752760038b75e16/Framework/include/SDMMobileDevice/SDMMD_Error.h#L512
+	// note that the `error & 0xff` isn't done here because there are defined errors like `0xe8008001`
+	const unsigned int error_code = error | 0xe8000000;
+
 	// Lookup error localization id
 	for (int i = 0; i < errorcode_to_id_count; i++) {
-		if (errorcode_to_id[i].error == error) {
+		if (errorcode_to_id[i].error == error_code) {
 			id = errorcode_to_id[i].id;
 			break;
 		}
