@@ -2304,7 +2304,7 @@ void device_callback(struct am_device_notification_callback_info *info, void *ar
         {
             CFStringRef device_interface_name = get_device_interface_name(info->dev);
             CFStringRef device_uuid = AMDeviceCopyDeviceIdentifier(info->dev);
-            NSLogOut(@"[....] Disconnected %@ from %@.", device_uuid, device_interface_name);
+            NSLogVerbose(@"[....] Disconnected %@ from %@.", device_uuid, device_interface_name);
             if (detect_only && _json_output) {
                 NSLogJSON(@{@"Event": @"DeviceDisconnected",
                             @"Device": get_device_json_dict(info->dev)
