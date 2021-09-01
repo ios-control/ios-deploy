@@ -314,19 +314,26 @@ CFStringRef copy_find_path(CFStringRef rootPath, CFStringRef namePattern) {
 CFStringRef copy_xcode_dev_path(void) {
     static char xcode_dev_path[256] = { '\0' };
     if (strlen(xcode_dev_path) == 0) {
-        FILE *fpipe = NULL;
-        char *command = "xcode-select -print-path";
+        const char* env_dev_path = getenv("DEVELOPER_DIR");
+        
+        if (env_dev_path && strlen(env_dev_path) > 0) {
+            strcpy(xcode_dev_path, env_dev_path);
+        } else {
+            FILE *fpipe = NULL;
+            char *command = "xcode-select -print-path";
 
-        if (!(fpipe = (FILE *)popen(command, "r")))
-            on_sys_error(@"Error encountered while opening pipe");
+            if (!(fpipe = (FILE *)popen(command, "r")))
+                on_sys_error(@"Error encountered while opening pipe");
 
-        char buffer[256] = { '\0' };
+            char buffer[256] = { '\0' };
 
-        fgets(buffer, sizeof(buffer), fpipe);
-        pclose(fpipe);
+            fgets(buffer, sizeof(buffer), fpipe);
+            pclose(fpipe);
 
-        strtok(buffer, "\n");
-        strcpy(xcode_dev_path, buffer);
+            strtok(buffer, "\n");
+            strcpy(xcode_dev_path, buffer);
+        }
+        NSLogVerbose(@"Found Xcode developer dir %s", xcode_dev_path);
     }
     return CFStringCreateWithCString(NULL, xcode_dev_path, kCFStringEncodingUTF8);
 }
