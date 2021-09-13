@@ -2101,12 +2101,8 @@ void uninstall_app(AMDeviceRef device) {
 
 void start_symbols_service_with_command(AMDeviceRef device, uint32_t command) {
     connect_and_start_session(device);
-    int start_err = AMDeviceSecureStartService(device, symbols_service_name, NULL,
-                                               &dbgServiceConnection);
-    if (start_err != 0) {
-        on_error(@"Failed to start service: %x %s", start_err,
-               symbols_service_name);
-    }
+    check_error(AMDeviceSecureStartService(device, symbols_service_name,
+                                           NULL, &dbgServiceConnection));
 
     uint32_t bytes_sent = AMDServiceConnectionSend(dbgServiceConnection, &command,
                                                     sizeof_uint32_t);
@@ -2163,7 +2159,7 @@ void write_dyld_file(CFStringRef dest, uint64_t file_size) {
         on_sys_error(@"Failed to mmap %@.", dest);
     }
     close(fd);
-  
+
     // Read the file content packet by packet until we've copied the entire file
     // to disk.
     uint64_t total_bytes_read = 0;
@@ -2194,11 +2190,11 @@ void write_dyld_file(CFStringRef dest, uint64_t file_size) {
                       });
         }
     }
-  
+
     munmap(map, file_size);
 }
 
-void download_dyld_file(AMDeviceRef device, uint32_t dyld_index,
+CFStringRef download_dyld_file(AMDeviceRef device, uint32_t dyld_index,
                         CFStringRef filepath) {
     start_symbols_service_with_command(device, symbols_download_file_command);
 
@@ -2216,7 +2212,7 @@ void download_dyld_file(AMDeviceRef device, uint32_t dyld_index,
         on_error(@"Read %d bytes but was expecting %d.", bytes_read, sizeof(uint64_t));
     }
     file_size = CFSwapInt64BigToHost(file_size);
-  
+
     CFStringRef download_path = CFStringCreateWithFormat(
         NULL, NULL, CFSTR("%s%@"), symbols_download_directory, filepath);
     mkdirp(
@@ -2229,21 +2225,101 @@ void download_dyld_file(AMDeviceRef device, uint32_t dyld_index,
               });
 
     write_dyld_file(download_path, file_size);
-  
-    CFRelease(download_path);
+
     AMDeviceStopSession(device);
     AMDeviceDisconnect(device);
+    return download_path;
+}
+
+CFStringRef create_dsc_bundle_path_for_device(AMDeviceRef device) {
+    CFStringRef xcode_dev_path = copy_xcode_dev_path();
+
+    AMDeviceConnect(device);
+    CFStringRef device_class = AMDeviceCopyValue(device, 0, CFSTR("DeviceClass"));
+    AMDeviceDisconnect(device);
+
+    CFStringRef platform_name;
+    if (CFStringCompare(CFSTR("AppleTV"), device_class, 0) == kCFCompareEqualTo) {
+        platform_name = CFSTR("AppleTVOS");
+    } else if (CFStringCompare(CFSTR("Watch"), device_class, 0) ==
+               kCFCompareEqualTo) {
+        platform_name = CFSTR("WatchOS");
+    } else {
+        platform_name = CFSTR("iPhoneOS");
+    }
+
+    return CFStringCreateWithFormat(
+        NULL, NULL,
+        CFSTR("%@/Platforms/%@.platform/usr/lib/dsc_extractor.bundle"),
+        xcode_dev_path, platform_name);
+}
+
+typedef int (*extractor_proc)(const char *shared_cache_file_path, const char *extraction_root_path,
+                              void (^progress)(unsigned current, unsigned total));
+
+void dyld_shared_cache_extract_dylibs(CFStringRef dsc_extractor_bundle_path,
+                                      CFStringRef shared_cache_file_path,
+                                      const char *extraction_root_path) {
+    const char *dsc_extractor_bundle_path_ptr =
+        CFStringGetCStringPtr(dsc_extractor_bundle_path, kCFStringEncodingUTF8);
+    void *handle = dlopen(dsc_extractor_bundle_path_ptr, RTLD_LAZY);
+    if (handle == NULL) {
+        on_error(@"%s could not be loaded", dsc_extractor_bundle_path);
+    }
+
+    extractor_proc proc = (extractor_proc)dlsym(
+        handle, "dyld_shared_cache_extract_dylibs_progress");
+    if (proc == NULL) {
+        on_error(
+            @"%s did not have dyld_shared_cache_extract_dylibs_progress symbol",
+            dsc_extractor_bundle_path);
+    }
+
+    const char *shared_cache_file_path_ptr =
+        CFStringGetCStringPtr(shared_cache_file_path, kCFStringEncodingUTF8);
+
+    __block uint64_t last_time = get_current_time_in_milliseconds() / 250;
+    int result =
+        (*proc)(shared_cache_file_path_ptr, extraction_root_path,
+                ^(unsigned c, unsigned total) {
+              uint64_t current_time = get_current_time_in_milliseconds() / 250;
+              if (!verbose && last_time == current_time) return;
+
+              last_time = current_time;
+              int percent = (double)c / total * 100;
+              NSLogOut(@"%d/%d (%d%%)", c, total, percent);
+              NSLogJSON(@{@"Event": @"DyldCacheExtractProgress",
+                           @"Extracted": @(c),
+                           @"Total": @(total),
+                           @"Percent": @(percent),
+                        });
+        });
+    if (result == 0) {
+        NSLogOut(@"Finished extracting %s.", shared_cache_file_path_ptr);
+    } else {
+        NSLogOut(@"Failed to extract %s, exit code %d.", shared_cache_file_path_ptr, result);
+    }
+    NSLogJSON(@{@"Event": @"DyldCacheExtract",
+                 @"Code": @(result),
+                 @"Path": (__bridge NSString *)shared_cache_file_path,
+              });
 }
 
 void download_device_symbols(AMDeviceRef device) {
     dbgServiceConnection = NULL;
     CFArrayRef files = get_dyld_file_paths(device);
     CFIndex files_count = CFArrayGetCount(files);
+    CFStringRef dsc_extractor_bundle = create_dsc_bundle_path_for_device(device);
 
     for (uint32_t i = 0; i < files_count; ++i) {
         CFStringRef filepath = (CFStringRef)CFArrayGetValueAtIndex(files, i);
-        download_dyld_file(device, i, filepath);
+        CFStringRef download_path = download_dyld_file(device, i, filepath);
+        dyld_shared_cache_extract_dylibs(dsc_extractor_bundle, download_path,
+                                             symbols_download_directory);
+        CFRelease(download_path);
     }
+
+    CFRelease(dsc_extractor_bundle);
 }
 
 void handle_device(AMDeviceRef device) {
