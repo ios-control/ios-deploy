@@ -2280,9 +2280,16 @@ void dyld_shared_cache_extract_dylibs(CFStringRef dsc_extractor_bundle_path,
 
     const char *shared_cache_file_path_ptr =
         CFStringGetCStringPtr(shared_cache_file_path, kCFStringEncodingUTF8);
+  
+    NSLogJSON(@{@"Event": @"DyldCacheExtract",
+                 @"Source": (__bridge NSString *)shared_cache_file_path,
+                 @"Destination": (__bridge NSString *)extraction_root_path,
+              });
 
     __block uint64_t last_time =
         get_current_time_in_milliseconds() / symbols_logging_interval_ms;
+    __block unsigned files_extracted = 0;
+    __block unsigned files_total = 0;
     int result =
         (*proc)(shared_cache_file_path_ptr, extraction_root_path,
                 ^(unsigned c, unsigned total) {
@@ -2291,6 +2298,9 @@ void dyld_shared_cache_extract_dylibs(CFStringRef dsc_extractor_bundle_path,
               if (!verbose && last_time == current_time) return;
 
               last_time = current_time;
+              files_extracted = c;
+              files_total = total;
+          
               int percent = (double)c / total * 100;
               NSLogOut(@"%d/%d (%d%%)", c, total, percent);
               NSLogJSON(@{@"Event": @"DyldCacheExtractProgress",
@@ -2301,12 +2311,16 @@ void dyld_shared_cache_extract_dylibs(CFStringRef dsc_extractor_bundle_path,
         });
     if (result == 0) {
         NSLogOut(@"Finished extracting %s.", shared_cache_file_path_ptr);
+        files_extracted = files_total;
     } else {
         NSLogOut(@"Failed to extract %s, exit code %d.", shared_cache_file_path_ptr, result);
     }
-    NSLogJSON(@{@"Event": @"DyldCacheExtract",
-                 @"Code": @(result),
-                 @"Path": (__bridge NSString *)shared_cache_file_path,
+    int percent = (double)files_extracted / files_total * 100;
+    NSLogJSON(@{@"Event": @"DyldCacheExtractProgress",
+                @"Code": @(result),
+                @"Extracted": @(files_extracted),
+                @"Total": @(files_total),
+                @"Percent": @(percent),
               });
 }
 
