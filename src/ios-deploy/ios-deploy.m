@@ -2666,7 +2666,7 @@ void usage(const char* app) {
         @"  -j, --json                   format output as JSON\n"
         @"  -k, --key                    keys for the properties of the bundle. Joined by ',' and used only with -B <list_bundle_id> and -j <json> \n"
         @"  --custom-script <script>     path to custom python script to execute in lldb\n"
-        @"  --custom-command <command>   specify additional lldb commands to execute\n",
+        @"  --custom-command <command>   specify additional lldb commands to execute\n"
         @"  --faster-path-search         use alternative logic to find the device support paths faster\n",
         [NSString stringWithUTF8String:app]);
 }
