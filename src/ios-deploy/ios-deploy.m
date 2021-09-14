@@ -137,6 +137,7 @@ CFRunLoopSourceRef fdvendor_runloop;
 uint32_t symbols_file_paths_command = 0x30303030;
 uint32_t symbols_download_file_command = 0x01000000;
 CFStringRef symbols_service_name = CFSTR("com.apple.dt.fetchsymbols");
+const int symbols_logging_interval_ms = 250;
 
 const size_t sizeof_uint32_t = sizeof(uint32_t);
 
@@ -2163,7 +2164,8 @@ void write_dyld_file(CFStringRef dest, uint64_t file_size) {
     // Read the file content packet by packet until we've copied the entire file
     // to disk.
     uint64_t total_bytes_read = 0;
-    uint64_t last_time = get_current_time_in_milliseconds() / 250;
+    uint64_t last_time =
+        get_current_time_in_milliseconds() / symbols_logging_interval_ms;
     while (total_bytes_read < file_size) {
         uint64_t bytes_remaining = file_size - total_bytes_read;
         // This fails for some reason if we try to download more than
@@ -2173,7 +2175,8 @@ void write_dyld_file(CFStringRef dest, uint64_t file_size) {
             dbgServiceConnection, map + total_bytes_read, bytes_to_download);
         total_bytes_read += bytes_read;
 
-        uint64_t current_time = get_current_time_in_milliseconds() / 250;
+        uint64_t current_time =
+            get_current_time_in_milliseconds() / symbols_logging_interval_ms;
         // We can process several packets per second which would result
         // in spamming output so only log if any of the following are
         // true:
@@ -2278,11 +2281,13 @@ void dyld_shared_cache_extract_dylibs(CFStringRef dsc_extractor_bundle_path,
     const char *shared_cache_file_path_ptr =
         CFStringGetCStringPtr(shared_cache_file_path, kCFStringEncodingUTF8);
 
-    __block uint64_t last_time = get_current_time_in_milliseconds() / 250;
+    __block uint64_t last_time =
+        get_current_time_in_milliseconds() / symbols_logging_interval_ms;
     int result =
         (*proc)(shared_cache_file_path_ptr, extraction_root_path,
                 ^(unsigned c, unsigned total) {
-              uint64_t current_time = get_current_time_in_milliseconds() / 250;
+              uint64_t current_time =
+                  get_current_time_in_milliseconds() / symbols_logging_interval_ms;
               if (!verbose && last_time == current_time) return;
 
               last_time = current_time;
@@ -2309,6 +2314,10 @@ void download_device_symbols(AMDeviceRef device) {
     dbgServiceConnection = NULL;
     CFArrayRef files = get_dyld_file_paths(device);
     CFIndex files_count = CFArrayGetCount(files);
+    NSLogOut(@"Downloading symbols files: %@", files);
+    NSLogJSON(@{@"Event": @"SymbolsDownload",
+                 @"Files": (__bridge NSArray *)files,
+              });
     CFStringRef dsc_extractor_bundle = create_dsc_bundle_path_for_device(device);
 
     for (uint32_t i = 0; i < files_count; ++i) {
