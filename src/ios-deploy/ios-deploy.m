@@ -2283,7 +2283,7 @@ void dyld_shared_cache_extract_dylibs(CFStringRef dsc_extractor_bundle_path,
   
     NSLogJSON(@{@"Event": @"DyldCacheExtract",
                  @"Source": (__bridge NSString *)shared_cache_file_path,
-                 @"Destination": (__bridge NSString *)extraction_root_path,
+                 @"Destination": @(extraction_root_path),
               });
 
     __block uint64_t last_time =
