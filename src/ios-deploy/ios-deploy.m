@@ -2283,7 +2283,7 @@ void dyld_shared_cache_extract_dylibs(CFStringRef dsc_extractor_bundle_path,
   
     NSLogJSON(@{@"Event": @"DyldCacheExtract",
                  @"Source": (__bridge NSString *)shared_cache_file_path,
-                 @"Destination": (__bridge NSString *)extraction_root_path,
+                 @"Destination": @(extraction_root_path),
               });
 
     __block uint64_t last_time =
@@ -2364,7 +2364,7 @@ void handle_device(AMDeviceRef device) {
     }
     if (found_device)
     {
-        NSLogOut(@"Skipping %@.", device_full_name);
+        NSLogVerbose(@"Skipping %@.", device_full_name);
         return;
     }
     CFStringRef found_device_id = CFAutorelease(AMDeviceCopyDeviceIdentifier(device));
@@ -2373,7 +2373,7 @@ void handle_device(AMDeviceRef device) {
         if (CFStringCompare(deviceCFSTR, found_device_id, kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
             found_device = true;
         } else {
-            NSLogOut(@"Skipping %@.", device_full_name);
+            NSLogVerbose(@"Skipping %@.", device_full_name);
             return;
         }
     } else {
