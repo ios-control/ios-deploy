@@ -1563,7 +1563,7 @@ void read_dir(AFCConnectionRef afc_conn_p, const char* dir,
         } else if (strcmp(key, "st_nlink") == 0) {
             nlink = atol(val);
         } else if (strcmp(key, "st_blocks") == 0) {
-            nlink = atol(val);
+            blocks = atol(val);
         }
     }
     AFCKeyValueClose(afc_dict_p);
