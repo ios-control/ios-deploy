@@ -359,6 +359,15 @@ CFStringRef copy_xcode_dev_path(void) {
         
         if (env_dev_path && strlen(env_dev_path) > 0) {
             strcpy(xcode_dev_path, env_dev_path);
+            // DEVELOPER_DIR should refer to Xcode.app/Contents/Developer, but
+            // xcode-select and friends have an extension to fix the path, if it points to Xcode.app/.
+            static char dev_subdir[256] = { '\0' };
+            strcat(strcat(dev_subdir, env_dev_path), "/Contents/Developer");
+            struct stat sb;
+            if (stat(dev_subdir, &sb) == 0)
+            {
+                strcpy(xcode_dev_path, dev_subdir);
+            }
         } else {
             FILE *fpipe = NULL;
             char *command = "xcode-select -print-path";
