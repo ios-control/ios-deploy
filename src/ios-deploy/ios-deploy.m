@@ -96,6 +96,13 @@ int AMDServiceConnectionSend(ServiceConnRef con, const void * data, size_t size)
 int AMDServiceConnectionReceive(ServiceConnRef con, void * data, size_t size);
 uint64_t AMDServiceConnectionReceiveMessage(ServiceConnRef con, CFPropertyListRef message, CFPropertyListFormat *format);
 uint64_t AMDServiceConnectionSendMessage(ServiceConnRef con, CFPropertyListRef message, CFPropertyListFormat format);
+CFArrayRef AMDeviceCopyProvisioningProfiles(AMDeviceRef device);
+int AMDeviceInstallProvisioningProfile(AMDeviceRef device, void *profile);
+int AMDeviceRemoveProvisioningProfile(AMDeviceRef device, CFStringRef uuid);
+CFStringRef MISProfileGetValue(void *profile, CFStringRef key);
+CFDictionaryRef MISProfileCopyPayload(void *profile);
+void *MISProfileCreateWithData(int zero, CFDataRef data);
+int MISProfileWriteToFile(void *profile, CFStringRef dest_path);
 
 bool found_device = false, debug = false, verbose = false, unbuffered = false, nostart = false, debugserver_only = false, detect_only = false, install = true, uninstall = false, no_wifi = false;
 bool faster_path_search = false;
@@ -117,6 +124,8 @@ char *envs = NULL;
 char *list_root = NULL;
 const char * custom_script_path = NULL;
 char *symbols_download_directory = NULL;
+char *profile_uuid = NULL;
+char *profile_path = NULL;
 int _timeout = 0;
 int _detectDeadlockTimeout = 0;
 bool _json_output = false;
@@ -1844,6 +1853,143 @@ void get_battery_level(AMDeviceRef device)
     check_error(AMDeviceDisconnect(device));
 }
 
+void replace_dict_date_with_absolute_time(CFMutableDictionaryRef dict, CFStringRef key) {
+    CFDateRef date = CFDictionaryGetValue(dict, key);
+    CFAbsoluteTime absolute_date = CFDateGetAbsoluteTime(date);
+    CFNumberRef absolute_date_ref = CFNumberCreate(NULL, kCFNumberDoubleType, &absolute_date);
+    CFDictionaryReplaceValue(dict, key, absolute_date_ref);
+    CFRelease(absolute_date_ref);
+}
+
+void list_provisioning_profiles(AMDeviceRef device) {
+    connect_and_start_session(device);
+    CFArrayRef device_provisioning_profiles = AMDeviceCopyProvisioningProfiles(device);
+
+    CFIndex provisioning_profiles_count = CFArrayGetCount(device_provisioning_profiles);
+    CFMutableArrayRef serializable_provisioning_profiles =
+        CFArrayCreateMutable(NULL, provisioning_profiles_count, &kCFTypeArrayCallBacks);
+
+    for (CFIndex i = 0; i < provisioning_profiles_count; i++) {
+        void *device_provisioning_profile =
+            (void *)CFArrayGetValueAtIndex(device_provisioning_profiles, i);
+        CFMutableDictionaryRef serializable_provisioning_profile;
+
+        if (verbose) {
+            // Verbose output; We selectively omit keys from profile.
+            CFDictionaryRef immutable_profile_dict =
+                MISProfileCopyPayload(device_provisioning_profile);
+            serializable_provisioning_profile =
+                CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, immutable_profile_dict);
+            CFRelease(immutable_profile_dict);
+
+            // Remove binary values from the output since they aren't readable and add a whole lot
+            // of noise to the output.
+            CFDictionaryRemoveValue(serializable_provisioning_profile,
+                                    CFSTR("DER-Encoded-Profile"));
+            CFDictionaryRemoveValue(serializable_provisioning_profile,
+                                    CFSTR("DeveloperCertificates"));
+        } else {
+            // Normal output; We selectively include keys from profile.
+            CFStringRef keys[] = {CFSTR("Name"), CFSTR("UUID"), CFSTR("ExpirationDate")};
+            CFIndex size = sizeof(keys) / sizeof(CFStringRef);
+            serializable_provisioning_profile =
+                CFDictionaryCreateMutable(kCFAllocatorDefault, size, &kCFTypeDictionaryKeyCallBacks,
+                                          &kCFTypeDictionaryValueCallBacks);
+            for (CFIndex i = 0; i < size; i++) {
+                CFStringRef key = keys[i];
+                CFStringRef value = MISProfileGetValue(device_provisioning_profile, key);
+                CFDictionaryAddValue(serializable_provisioning_profile, key, value);
+            }
+        }
+
+        if (_json_output) {
+            // JSON output can't have CFDate objects so convert dates into CFAbsoluteTime's.
+            replace_dict_date_with_absolute_time(serializable_provisioning_profile,
+                                                 CFSTR("ExpirationDate"));
+            replace_dict_date_with_absolute_time(serializable_provisioning_profile,
+                                                 CFSTR("CreationDate"));
+        }
+
+        CFArrayAppendValue(serializable_provisioning_profiles, serializable_provisioning_profile);
+        CFRelease(serializable_provisioning_profile);
+    }
+    CFRelease(device_provisioning_profiles);
+
+    if (_json_output) {
+        NSLogJSON(@{
+            @"Event" : @"ListProvisioningProfiles",
+            @"Profiles" : (NSArray *)serializable_provisioning_profiles
+        });
+    } else {
+        NSLogOut(@"%@", serializable_provisioning_profiles);
+    }
+    CFRelease(serializable_provisioning_profiles);
+}
+
+void install_provisioning_profile(AMDeviceRef device) {
+    if (!profile_path) {
+        on_error(@"no path to provisioning profile specified");
+    }
+
+    size_t file_size = 0;
+    void *file_content = read_file_to_memory(profile_path, &file_size);
+    CFDataRef profile_data = CFDataCreate(NULL, file_content, file_size);
+    void *profile = MISProfileCreateWithData(0, profile_data);
+    connect_and_start_session(device);
+    check_error(AMDeviceInstallProvisioningProfile(device, profile));
+
+    free(file_content);
+    CFRelease(profile_data);
+    CFRelease(profile);
+}
+
+void uninstall_provisioning_profile(AMDeviceRef device) {
+    if (!profile_uuid) {
+        on_error(@"no profile UUID specified via --profile-uuid");
+    }
+
+    CFStringRef uuid = CFStringCreateWithCString(NULL, profile_uuid, kCFStringEncodingUTF8);
+    connect_and_start_session(device);
+    check_error(AMDeviceRemoveProvisioningProfile(device, uuid));
+    CFRelease(uuid);
+}
+
+void download_provisioning_profile(AMDeviceRef device) {
+    if (!profile_uuid) {
+        on_error(@"no profile UUID specified via --profile-uuid");
+    } else if (!profile_path) {
+        on_error(@"no download path specified");
+    }
+
+    connect_and_start_session(device);
+    CFArrayRef device_provisioning_profiles = AMDeviceCopyProvisioningProfiles(device);
+    CFIndex provisioning_profiles_count = CFArrayGetCount(device_provisioning_profiles);
+    CFStringRef uuid = CFStringCreateWithCString(NULL, profile_uuid, kCFStringEncodingUTF8);
+    bool found_matching_uuid = false;
+
+    for (CFIndex i = 0; i < provisioning_profiles_count; i++) {
+        void *profile = (void *)CFArrayGetValueAtIndex(device_provisioning_profiles, i);
+        CFStringRef other_uuid = MISProfileGetValue(profile, CFSTR("UUID"));
+        found_matching_uuid = CFStringCompare(uuid, other_uuid, 0) == kCFCompareEqualTo;
+
+        if (found_matching_uuid) {
+            NSLogVerbose(@"Writing %@ to %s", MISProfileGetValue(profile, CFSTR("Name")),
+                         profile_path);
+            CFStringRef dst_path =
+                CFStringCreateWithCString(NULL, profile_path, kCFStringEncodingUTF8);
+            check_error(MISProfileWriteToFile(profile, dst_path));
+            CFRelease(dst_path);
+            break;
+        }
+    }
+
+    CFRelease(uuid);
+    CFRelease(device_provisioning_profiles);
+    if (!found_matching_uuid) {
+        on_error(@"Did not find provisioning profile with UUID %x on device", profile_uuid);
+    }
+}
+
 void list_bundle_id(AMDeviceRef device)
 {
     connect_and_start_session(device);
@@ -2446,6 +2592,14 @@ void handle_device(AMDeviceRef device) {
             get_battery_level(device);
         } else if (strcmp("symbols", command) == 0) {
             download_device_symbols(device);
+        } else if (strcmp("list_profiles", command) == 0) {
+            list_provisioning_profiles(device);
+        } else if (strcmp("install_profile", command) == 0) {
+            install_provisioning_profile(device);
+        } else if (strcmp("uninstall_profile", command) == 0) {
+            uninstall_provisioning_profile(device);
+        } else if (strcmp("download_profile", command) == 0) {
+            download_provisioning_profile(device);
         }
         exit(0);
     }
@@ -2707,6 +2861,11 @@ void usage(const char* app) {
         @"  --custom-script <script>     path to custom python script to execute in lldb\n"
         @"  --custom-command <command>   specify additional lldb commands to execute\n"
         @"  --faster-path-search         use alternative logic to find the device support paths faster\n",
+        @"  -P, --list_profiles          list all provisioning profiles on device\n"
+        @"  --profile-uuid <uuid>        the UUID of the provisioning profile to target, use with other profile commands\n"
+        @"  --profile-download <path>    download a provisioning profile (requires --profile-uuid)\n"
+        @"  --profile-install <file>     install a provisioning profile\n"
+        @"  --profile-uninstall          uninstall a provisioning profile (requires --profile-uuid <UUID>)\n",
         [NSString stringWithUTF8String:app]);
 }
 
@@ -2764,14 +2923,19 @@ int main(int argc, char *argv[]) {
         { "non-recursively", no_argument, NULL, 'F'},
         { "key", optional_argument, NULL, 'k' },
         { "symbols", required_argument, NULL, 'S' },
+        { "list_profiles", no_argument, NULL, 'P' },
         { "custom-script", required_argument, NULL, 1001},
         { "custom-command", required_argument, NULL, 1002},
         { "faster-path-search", no_argument, NULL, 1003},
+        { "profile-install", required_argument, NULL, 1004},
+        { "profile-uninstall", no_argument, NULL, 1005},
+        { "profile-download", required_argument, NULL, 1006},
+        { "profile-uuid", required_argument, NULL, 1007},
         { NULL, 0, NULL, 0 },
     };
     int ch;
 
-    while ((ch = getopt_long(argc, argv, "VmcdvunrILefFD:R:X:i:b:a:t:p:1:2:o:l:w:9BWjNs:OE:CA:k:S:", longopts, NULL)) != -1)
+    while ((ch = getopt_long(argc, argv, "VmcdvunrILefFD:R:X:i:b:a:t:p:1:2:o:l:w:9BWjNs:OE:CA:k:S:P", longopts, NULL)) != -1)
     {
         switch (ch) {
         case 'm':
@@ -2924,6 +3088,27 @@ int main(int argc, char *argv[]) {
             break;
         case 1003:
             faster_path_search = true;
+            break;
+        case 1004:
+            command_only = true;
+            command = "install_profile";
+            profile_path = optarg;
+            break;
+        case 1005:
+            command_only = true;
+            command = "uninstall_profile";
+            break;
+        case 1006:
+            command_only = true;
+            command = "download_profile";
+            profile_path = optarg;
+            break;
+        case 1007:
+            profile_uuid = optarg;
+            break;
+        case 'P':
+            command_only = true;
+            command = "list_profiles";
             break;
         case 'k':
             if (!keys) keys = [[NSMutableArray alloc] init];
