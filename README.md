@@ -52,7 +52,7 @@ python -m py_compile src/scripts/*.py && xcodebuild -target ios-deploy && xcodeb
     Usage: ios-deploy [OPTION]...
 	  -d, --debug                  launch the app in lldb after installation
 	  -i, --id <device_id>         the id of the device to connect to
-	  -c, --detect                 only detect if the device is connected
+	  -c, --detect                 list all connected devices
 	  -b, --bundle <bundle.app>    the path to the app bundle to be installed
 	  -a, --args <args>            command line arguments to pass to the app when launching it
 	  -s, --envs <envs>            environment variables, space separated key-value pairs, to pass to the app when launching it

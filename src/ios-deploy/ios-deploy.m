@@ -2667,7 +2667,7 @@ void usage(const char* app) {
         @"Usage: %@ [OPTION]...\n"
         @"  -d, --debug                  launch the app in lldb after installation\n"
         @"  -i, --id <device_id>         the id of the device to connect to\n"
-        @"  -c, --detect                 only detect if the device is connected\n"
+        @"  -c, --detect                 list all connected devices\n"
         @"  -b, --bundle <bundle.app>    the path to the app bundle to be installed\n"
         @"  -a, --args <args>            command line arguments to pass to the app when launching it\n"
         @"  -s, --envs <envs>            environment variables, space separated key-value pairs, to pass to the app when launching it\n"
