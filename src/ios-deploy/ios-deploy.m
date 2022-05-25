@@ -456,6 +456,13 @@ device_desc get_device_desc(CFStringRef model) {
     return res;
 }
 
+void connect_and_start_session(AMDeviceRef device) {
+    AMDeviceConnect(device);
+    assert(AMDeviceIsPaired(device));
+    check_error(AMDeviceValidatePairing(device));
+    check_error(AMDeviceStartSession(device));
+}
+
 CFStringRef get_device_full_name(const AMDeviceRef device) {
     CFStringRef full_name = NULL,
                 device_udid = AMDeviceCopyDeviceIdentifier(device),
@@ -521,7 +528,7 @@ CFStringRef get_device_full_name(const AMDeviceRef device) {
 
 NSDictionary* get_device_json_dict(const AMDeviceRef device) {
     NSMutableDictionary *json_dict = [NSMutableDictionary new];
-    AMDeviceConnect(device);
+    connect_and_start_session(device);
     
     CFStringRef device_udid = AMDeviceCopyDeviceIdentifier(device);
     if (device_udid) {
@@ -1212,13 +1219,6 @@ void fdvendor_callback(CFSocketRef s, CFSocketCallBackType callbackType, CFDataR
 
     CFSocketInvalidate(s);
     CFRelease(s);
-}
-
-void connect_and_start_session(AMDeviceRef device) {
-    AMDeviceConnect(device);
-    assert(AMDeviceIsPaired(device));
-    check_error(AMDeviceValidatePairing(device));
-    check_error(AMDeviceStartSession(device));
 }
 
 void start_remote_debug_server(AMDeviceRef device) {
@@ -2539,6 +2539,7 @@ void handle_device(AMDeviceRef device) {
     if (detect_only) {
         if (_json_output) {
             NSLogJSON(@{@"Event": @"DeviceDetected",
+                        @"Interface": (__bridge NSString *)device_interface_name,
                         @"Device": get_device_json_dict(device)
                         });
         } else {
@@ -2770,6 +2771,7 @@ void device_callback(struct am_device_notification_callback_info *info, void *ar
             NSLogVerbose(@"[....] Disconnected %@ from %@.", device_uuid, device_interface_name);
             if (detect_only && _json_output) {
                 NSLogJSON(@{@"Event": @"DeviceDisconnected",
+                            @"Interface": (__bridge NSString *)device_interface_name,
                             @"Device": get_device_json_dict(info->dev)
                             });
             }
