@@ -456,6 +456,10 @@ device_desc get_device_desc(CFStringRef model) {
     return res;
 }
 
+bool is_usb_device(const AMDeviceRef device) {
+  return AMDeviceGetInterfaceType(device) == 1;
+}
+
 void connect_and_start_session(AMDeviceRef device) {
     AMDeviceConnect(device);
     assert(AMDeviceIsPaired(device));
@@ -528,7 +532,7 @@ CFStringRef get_device_full_name(const AMDeviceRef device) {
 
 NSDictionary* get_device_json_dict(const AMDeviceRef device) {
     NSMutableDictionary *json_dict = [NSMutableDictionary new];
-    connect_and_start_session(device);
+    is_usb_device(device) ? AMDeviceConnect(device) : connect_and_start_session(device);
     
     CFStringRef device_udid = AMDeviceCopyDeviceIdentifier(device);
     if (device_udid) {
@@ -2422,9 +2426,12 @@ CFStringRef download_dyld_file(AMDeviceRef device, uint32_t dyld_index,
 CFStringRef create_dsc_bundle_path_for_device(AMDeviceRef device) {
     CFStringRef xcode_dev_path = copy_xcode_dev_path();
 
-    AMDeviceConnect(device);
+    is_usb_device(device) ? AMDeviceConnect(device) : connect_and_start_session(device);
     CFStringRef device_class = AMDeviceCopyValue(device, 0, CFSTR("DeviceClass"));
     AMDeviceDisconnect(device);
+    if (!device_class) {
+      on_error(@"Failed to determine device class");
+    }
 
     CFStringRef platform_name;
     if (CFStringCompare(CFSTR("AppleTV"), device_class, 0) == kCFCompareEqualTo) {
