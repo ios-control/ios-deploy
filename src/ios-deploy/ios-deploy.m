@@ -91,6 +91,9 @@ int AMDeviceMountImage(AMDeviceRef device, CFStringRef image, CFDictionaryRef op
 mach_error_t AMDeviceLookupApplications(AMDeviceRef device, CFDictionaryRef options, CFDictionaryRef *result);
 int AMDeviceGetInterfaceType(AMDeviceRef device);
 AMDeviceRef AMDeviceCopyPairedCompanion(AMDeviceRef device);
+#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+unsigned int AMDeviceCopyDeveloperModeStatus(AMDeviceRef device, uint32_t error_code);
+#endif
 
 int AMDServiceConnectionSend(ServiceConnRef con, const void * data, size_t size);
 int AMDServiceConnectionReceive(ServiceConnRef con, void * data, size_t size);
@@ -2289,6 +2292,34 @@ void uninstall_app(AMDeviceRef device) {
     }
 }
 
+#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+void check_developer_mode(AMDeviceRef device) {
+  unsigned int error_code = 0;
+  bool is_enabled = AMDeviceCopyDeveloperModeStatus(device, &error_code);
+
+  if (error_code) {
+    const char *mobdev_error = get_error_message(error_code);
+    NSString *error_description = mobdev_error ? [NSString stringWithUTF8String:mobdev_error] : @"unknown.";
+    if (_json_output) {
+      NSLogJSON(@{
+        @"Event": @"DeveloperMode",
+        @"IsEnabled": @(is_enabled),
+        @"Code": @(error_code),
+        @"Status": error_description,
+      });
+    } else {
+      NSLogOut(@"Encountered error checking developer mode status: %@", error_description);
+    }
+  } else {
+    if (_json_output) {
+      NSLogJSON(@{@"Event": @"DeveloperMode", @"IsEnabled": @(is_enabled)});
+    } else {
+      NSLogOut(@"Developer mode is%s enabled.", is_enabled ? "" : " not");
+    }
+  }
+}
+#endif
+
 void start_symbols_service_with_command(AMDeviceRef device, uint32_t command) {
     connect_and_start_session(device);
     check_error(AMDeviceSecureStartService(device, symbols_service_name,
@@ -2608,7 +2639,11 @@ void handle_device(AMDeviceRef device) {
             uninstall_provisioning_profile(device);
         } else if (strcmp("download_profile", command) == 0) {
             download_provisioning_profile(device);
-        }
+#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+        } else if (strcmp("check_developer_mode", command) == 0) {
+          check_developer_mode(device);
+#endif
+      }
         exit(0);
     }
 
@@ -2874,7 +2909,12 @@ void usage(const char* app) {
         @"  --profile-uuid <uuid>        the UUID of the provisioning profile to target, use with other profile commands\n"
         @"  --profile-download <path>    download a provisioning profile (requires --profile-uuid)\n"
         @"  --profile-install <file>     install a provisioning profile\n"
-        @"  --profile-uninstall          uninstall a provisioning profile (requires --profile-uuid <UUID>)\n",
+        @"  --profile-uninstall          uninstall a provisioning profile (requires --profile-uuid <UUID>)\n"
+#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+        @"  --check-developer-mode       checks whether the given device has developer mode enabled\n",
+#else
+        ,
+#endif
         [NSString stringWithUTF8String:app]);
 }
 
@@ -2940,6 +2980,9 @@ int main(int argc, char *argv[]) {
         { "profile-uninstall", no_argument, NULL, 1005},
         { "profile-download", required_argument, NULL, 1006},
         { "profile-uuid", required_argument, NULL, 1007},
+#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+        { "check-developer-mode", no_argument, NULL, 1008},
+#endif
         { NULL, 0, NULL, 0 },
     };
     int ch;
@@ -3115,6 +3158,12 @@ int main(int argc, char *argv[]) {
         case 1007:
             profile_uuid = optarg;
             break;
+#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+        case 1008:
+          command_only = true;
+          command = "check_developer_mode";
+          break;
+#endif
         case 'P':
             command_only = true;
             command = "list_profiles";
