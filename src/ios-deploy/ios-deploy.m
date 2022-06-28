@@ -2305,13 +2305,13 @@ void check_developer_mode(AMDeviceRef device) {
         @"Status": error_description,
       });
     } else {
-      on_error(@"Encountered error checking developer mode status: %@", error_description);
+      NSLogOut(@"Encountered error checking developer mode status: %@", error_description);
     }
   } else {
     if (_json_output) {
       NSLogJSON(@{@"Event": @"DeveloperMode", @"IsEnabled": @(is_enabled)});
     } else {
-      on_error(@"Developer mode is%s enabled.", is_enabled ? "" : " not");
+      NSLogOut(@"Developer mode is%s enabled.", is_enabled ? "" : " not");
     }
   }
 }
