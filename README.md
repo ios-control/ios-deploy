@@ -66,8 +66,8 @@ python -m py_compile src/scripts/*.py && xcodebuild -target ios-deploy && xcodeb
 	  -m, --noinstall              directly start debugging without app install (-d not required)
 	  -A, --app_deltas             incremental install. must specify a directory to store app deltas to determine what needs to be installed
 	  -p, --port <number>          port used for device, default: dynamic
-	  -r, --uninstall              uninstall the app before install (do not use with -m; app cache and data are cleared)
-	  -9, --uninstall_only         uninstall the app ONLY. Use only with -1 <bundle_id>
+	  -r, --uninstall              uninstall the app before install (do not use with -m; app cache and data are cleared) 
+	  -9, --uninstall_only         uninstall the app ONLY. Use only with -1 <bundle_id> 
 	  -1, --bundle_id <bundle id>  specify bundle id for list and upload
 	  -l, --list[=<dir>]           list all app files or the specified directory
 	  -o, --upload <file>          upload file
@@ -76,28 +76,18 @@ python -m py_compile src/scripts/*.py && xcodebuild -target ios-deploy && xcodeb
 	  -D, --mkdir <dir>            make directory on device
 	  -R, --rm <path>              remove file or directory on device (directories must be empty)
 	  -X, --rmtree <path>          remove directory and all contained files recursively on device
-	  -V, --version                print the executable version
-	  -e, --exists                 check if the app with given bundle_id is installed or not
-	  -B, --list_bundle_id         list bundle_id
+	  -V, --version                print the executable version 
+	  -e, --exists                 check if the app with given bundle_id is installed or not 
+	  -B, --list_bundle_id         list bundle_id 
 	  -W, --no-wifi                ignore wifi devices
-	  -C, --get_battery_level      get battery current capacity
+	  -C, --get_battery_level      get battery current capacity 
 	  -O, --output <file>          write stdout to this file
 	  -E, --error_output <file>    write stderr to this file
 	  --detect_deadlocks <sec>     start printing backtraces for all threads periodically after specific amount of seconds
 	  -f, --file_system            specify file system for mkdir / list / upload / download / rm
-	  -F, --non-recursively        specify non-recursively walk directory
-	  -S, --symbols                download OS symbols. must specify a directory to store the downloaded symbols
-	  -j, --json                   format output as JSON
 	  -k, --key                    keys for the properties of the bundle. Joined by ',' and used only with -B <list_bundle_id> and -j <json>
-	  --custom-script <script>     path to custom python script to execute in lldb
-	  --custom-command <command>   specify additional lldb commands to execute
-	  --faster-path-search         use alternative logic to find the device support paths faster
-	  -P, --list_profiles          list all provisioning profiles on device
-	  --profile-uuid <uuid>        the UUID of the provisioning profile to target, use with other profile commands
-	  --profile-download <path>    download a provisioning profile (requires --profile-uuid)
-	  --profile-install <file>     install a provisioning profile
-	  --profile-uninstall          uninstall a provisioning profile (requires --profile-uuid <UUID>)
-	  --check-developer-mode       checks whether the given device has developer mode enabled
+	  -F, --non-recursively        specify non-recursively walk directory
+	  -j, --json                   format output as JSON
 
 ## Examples
 
