@@ -92,7 +92,7 @@ mach_error_t AMDeviceLookupApplications(AMDeviceRef device, CFDictionaryRef opti
 int AMDeviceGetInterfaceType(AMDeviceRef device);
 AMDeviceRef AMDeviceCopyPairedCompanion(AMDeviceRef device);
 #if defined(XCODE_14_OR_NEWER_AVAILABLE)
-unsigned int AMDeviceCopyDeveloperModeStatus(AMDeviceRef device, uint32_t error_code);
+unsigned int AMDeviceCopyDeveloperModeStatus(AMDeviceRef device, uint32_t *error_code);
 #endif
 
 int AMDServiceConnectionSend(ServiceConnRef con, const void * data, size_t size);
