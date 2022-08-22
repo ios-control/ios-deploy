@@ -2911,7 +2911,7 @@ void usage(const char* app) {
         @"  --profile-install <file>     install a provisioning profile\n"
         @"  --profile-uninstall          uninstall a provisioning profile (requires --profile-uuid <UUID>)\n"
 #if defined(XCODE_14_OR_NEWER_AVAILABLE)
-        @"  --check-developer-mode       checks whether the given device has developer mode enabled\n",
+        @"  --check-developer-mode       checks whether the given device has developer mode enabled (requires Xcode 14 or newer)\n",
 #else
         ,
 #endif
