@@ -97,7 +97,7 @@ python -m py_compile src/scripts/*.py && xcodebuild -target ios-deploy && xcodeb
 	  --profile-download <path>    download a provisioning profile (requires --profile-uuid)
 	  --profile-install <file>     install a provisioning profile
 	  --profile-uninstall          uninstall a provisioning profile (requires --profile-uuid <UUID>)
-	  --check-developer-mode       checks whether the given device has developer mode enabled
+	  --check-developer-mode       checks whether the given device has developer mode enabled (Requires Xcode 14 or newer)
 
 ## Examples
 
