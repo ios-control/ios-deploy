@@ -91,7 +91,7 @@ int AMDeviceMountImage(AMDeviceRef device, CFStringRef image, CFDictionaryRef op
 mach_error_t AMDeviceLookupApplications(AMDeviceRef device, CFDictionaryRef options, CFDictionaryRef *result);
 int AMDeviceGetInterfaceType(AMDeviceRef device);
 AMDeviceRef AMDeviceCopyPairedCompanion(AMDeviceRef device);
-#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+#if defined(IOS_DEPLOY_FEATURE_DEVELOPER_MODE)
 unsigned int AMDeviceCopyDeveloperModeStatus(AMDeviceRef device, uint32_t *error_code);
 #endif
 
@@ -2292,7 +2292,7 @@ void uninstall_app(AMDeviceRef device) {
     }
 }
 
-#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+#if defined(IOS_DEPLOY_FEATURE_DEVELOPER_MODE)
 void check_developer_mode(AMDeviceRef device) {
   unsigned int error_code = 0;
   bool is_enabled = AMDeviceCopyDeveloperModeStatus(device, &error_code);
@@ -2639,7 +2639,7 @@ void handle_device(AMDeviceRef device) {
             uninstall_provisioning_profile(device);
         } else if (strcmp("download_profile", command) == 0) {
             download_provisioning_profile(device);
-#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+#if defined(IOS_DEPLOY_FEATURE_DEVELOPER_MODE)
         } else if (strcmp("check_developer_mode", command) == 0) {
           check_developer_mode(device);
 #endif
@@ -2910,7 +2910,7 @@ void usage(const char* app) {
         @"  --profile-download <path>    download a provisioning profile (requires --profile-uuid)\n"
         @"  --profile-install <file>     install a provisioning profile\n"
         @"  --profile-uninstall          uninstall a provisioning profile (requires --profile-uuid <UUID>)\n"
-#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+#if defined(IOS_DEPLOY_FEATURE_DEVELOPER_MODE)
         @"  --check-developer-mode       checks whether the given device has developer mode enabled (requires Xcode 14 or newer)\n",
 #else
         ,
@@ -2980,7 +2980,7 @@ int main(int argc, char *argv[]) {
         { "profile-uninstall", no_argument, NULL, 1005},
         { "profile-download", required_argument, NULL, 1006},
         { "profile-uuid", required_argument, NULL, 1007},
-#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+#if defined(IOS_DEPLOY_FEATURE_DEVELOPER_MODE)
         { "check-developer-mode", no_argument, NULL, 1008},
 #endif
         { NULL, 0, NULL, 0 },
@@ -3158,7 +3158,7 @@ int main(int argc, char *argv[]) {
         case 1007:
             profile_uuid = optarg;
             break;
-#if defined(XCODE_14_OR_NEWER_AVAILABLE)
+#if defined(IOS_DEPLOY_FEATURE_DEVELOPER_MODE)
         case 1008:
           command_only = true;
           command = "check_developer_mode";
