@@ -702,7 +702,7 @@ CFStringRef copy_device_support_path(AMDeviceRef device, CFStringRef suffix) {
             break;
         }
 
-        // Not all iOS versions have a dedicated developer disk image. Xcode 13.4.1 supporta
+        // Not all iOS versions have a dedicated developer disk image. Xcode 13.4.1 supports
         // iOS up to 15.5 but does not include developer disk images for 15.1 or 15.3
         // despite being able to deploy to them. For this reason, this logic looks for previous
         // minor versions if it doesn't find an exact match. In the case where the disk image
