@@ -620,7 +620,7 @@ CFMutableArrayRef copy_device_product_version_parts(AMDeviceRef device) {
 CFStringRef copy_device_support_path(AMDeviceRef device, CFStringRef suffix) {
     time_t startTime, endTime;
     time( &startTime );
-    
+
     CFStringRef version = NULL;
     CFStringRef build = AMDeviceCopyValue(device, 0, CFSTR("BuildVersion"));
     CFStringRef deviceClass = AMDeviceCopyValue(device, 0, CFSTR("DeviceClass"));
@@ -641,7 +641,7 @@ CFStringRef copy_device_support_path(AMDeviceRef device, CFStringRef suffix) {
     NSLogVerbose(@"build: %@", build);
 
     CFStringRef deviceClassPath[2];
-    
+
     if (CFStringCompare(CFSTR("AppleTV"), deviceClass, 0) == kCFCompareEqualTo) {
       deviceClassPath[0] = CFSTR("Platforms/AppleTVOS.platform/DeviceSupport");
       deviceClassPath[1] = CFSTR("tvOS DeviceSupport");
@@ -654,10 +654,12 @@ CFStringRef copy_device_support_path(AMDeviceRef device, CFStringRef suffix) {
       deviceClassPath[0] = CFSTR("Platforms/iPhoneOS.platform/DeviceSupport");
       deviceClassPath[1] = CFSTR("iOS DeviceSupport");
     }
+
+    CFMutableArrayRef string_allocations = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
     while (CFArrayGetCount(version_parts) > 0) {
         version = CFStringCreateByCombiningStrings(NULL, version_parts, CFSTR("."));
         NSLogVerbose(@"version: %@", version);
-        
+
         for( int i = 0; i < 2; ++i ) {
             if (path == NULL) {
                 CFStringRef search = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@ (%@) %@/%@"), version, build, deviceArch, suffix);
@@ -670,13 +672,13 @@ CFStringRef copy_device_support_path(AMDeviceRef device, CFStringRef suffix) {
                 path = copy_xcode_path_for(deviceClassPath[i], search);
                 CFRelease(search);
             }
-            
+
             if (path == NULL) {
                 CFStringRef search = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@ (*)/%@"), version, suffix);
                 path = copy_xcode_path_for(deviceClassPath[i], search);
                 CFRelease(search);
             }
-            
+
             if (path == NULL) {
                 CFStringRef search = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@/%@"), version, suffix);
                 path = copy_xcode_path_for(deviceClassPath[i], search);
@@ -694,14 +696,39 @@ CFStringRef copy_device_support_path(AMDeviceRef device, CFStringRef suffix) {
                 CFRelease(search);
             }
         }
-        
+
         CFRelease(version);
         if (path != NULL) {
             break;
         }
+
+        // Not all iOS versions have a dedicated developer disk image. Xcode 13.4.1 supporta
+        // iOS up to 15.5 but does not include developer disk images for 15.1 or 15.3
+        // despite being able to deploy to them. For this reason, this logic looks for previous
+        // minor versions if it doesn't find an exact match. In the case where the disk image
+        // from a previous minor version is not compatible, deployment will fail with
+        // kAMDInvalidServiceError.
+        CFStringRef previous_minor_version = NULL;
+        if (CFEqual(CFSTR("DeveloperDiskImage.dmg"), suffix) &&
+            CFArrayGetCount(version_parts) == 2) {
+            int minor_version = CFStringGetIntValue(CFArrayGetValueAtIndex(version_parts, 1));
+            if (minor_version > 0) {
+                previous_minor_version = CFStringCreateWithFormat(kCFAllocatorDefault, NULL,
+                                                                  CFSTR("%d"), minor_version - 1);
+                CFArrayAppendValue(string_allocations, previous_minor_version);
+            }
+        }
         CFArrayRemoveValueAtIndex(version_parts, CFArrayGetCount(version_parts) - 1);
+        if (previous_minor_version) {
+            CFArrayAppendValue(version_parts, previous_minor_version);
+        }
     }
-    
+
+    for (int i = 0; i < CFArrayGetCount(string_allocations); i++) {
+        CFRelease(CFArrayGetValueAtIndex(string_allocations, i));
+    }
+    CFRelease(string_allocations);
+
     for( int i = 0; i < 2; ++i ) {
         if (path == NULL) {
             CFStringRef search = CFStringCreateWithFormat(NULL, NULL, CFSTR("Latest/%@"), suffix);
