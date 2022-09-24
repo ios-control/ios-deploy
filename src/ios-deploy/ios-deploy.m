@@ -1421,6 +1421,11 @@ void setup_lldb(AMDeviceRef device, CFURLRef url) {
     device_interface_name = get_device_interface_name(device);
 
     connect_and_start_session(device);
+    CFBooleanRef is_password_protected = AMDeviceCopyValue(device, 0, CFSTR("PasswordProtected"));
+    NSLogJSON(@{@"Event": @"PasswordProtectedStatus",
+                @"Status": @(CFBooleanGetValue(is_password_protected)),
+    });
+    CFRelease(is_password_protected);
 
     NSLogOut(@"------ Debug phase ------");
 

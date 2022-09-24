@@ -439,7 +439,7 @@ mach_error_t AMDeviceEnterRecovery(struct am_device *device);
 mach_error_t AMDeviceDisconnect(struct am_device *device);
 mach_error_t AMDeviceRetain(struct am_device *device);
 mach_error_t AMDeviceRelease(struct am_device *device);
-CFStringRef AMDeviceCopyValue(struct am_device *device, void*, CFStringRef cfstring);
+CFTypeRef AMDeviceCopyValue(struct am_device *device, void*, CFStringRef cfstring);
 CFStringRef AMDeviceCopyDeviceIdentifier(struct am_device *device);
 
 typedef void (*notify_callback)(CFStringRef notification, void *data);
