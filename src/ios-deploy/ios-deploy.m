@@ -2588,15 +2588,23 @@ void download_device_symbols(AMDeviceRef device) {
                  @"Files": (__bridge NSArray *)files,
               });
     CFStringRef dsc_extractor_bundle = create_dsc_bundle_path_for_device(device);
+    CFMutableArrayRef downloaded_files = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
 
+    // download files
     for (uint32_t i = 0; i < files_count; ++i) {
         CFStringRef filepath = (CFStringRef)CFArrayGetValueAtIndex(files, i);
         CFStringRef download_path = download_dyld_file(device, i, filepath);
+        CFArrayAppendValue(downloaded_files, download_path);
+    }
+    // extract files
+    for (uint32_t i = 0; i < files_count; ++i) {
+        CFStringRef download_path = (CFStringRef)CFArrayGetValueAtIndex(downloaded_files, i);
         dyld_shared_cache_extract_dylibs(dsc_extractor_bundle, download_path,
                                              symbols_download_directory);
         CFRelease(download_path);
     }
 
+    CFRelease(downloaded_files);
     CFRelease(dsc_extractor_bundle);
 }
 
