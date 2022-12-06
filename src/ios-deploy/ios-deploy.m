@@ -2733,16 +2733,7 @@ void handle_device(AMDeviceRef device) {
         NSLogOut(@"------ Install phase ------");
         NSLogOut(@"[  0%%] Found %@ connected through %@, beginning install", device_full_name, device_interface_name);
 
-        CFStringRef install_bundle_id = NULL;
-        if (bundle_id != NULL) {
-          install_bundle_id = CFStringCreateWithCString(NULL, bundle_id, kCFStringEncodingUTF8);
-        } else {
-          CFStringRef extracted_bundle_id = copy_bundle_id(url);
-          if (extracted_bundle_id == NULL) {
-            on_error(@"[ ERROR] Could not determine bundle id.");
-          }
-          install_bundle_id = extracted_bundle_id;
-        }
+        CFStringRef install_bundle_id = bundle_id == NULL ? copy_bundle_id(url) : CFStringCreateWithCString(NULL, bundle_id, kCFStringEncodingUTF8);
 
         CFDictionaryRef options;
         if (app_deltas == NULL) { // standard install
@@ -2756,6 +2747,9 @@ void handle_device(AMDeviceRef device) {
           check_error(AMDeviceStopSession(device));
           check_error(AMDeviceDisconnect(device));
         } else { // incremental install
+          if (install_bundle_id == NULL) {
+            on_error(@"[ ERROR] Could not determine bundle id.");
+          }
           CFStringRef deltas_path =
             CFStringCreateWithCString(NULL, app_deltas, kCFStringEncodingUTF8);
           CFURLRef deltas_relative_url =
@@ -2797,24 +2791,32 @@ void handle_device(AMDeviceRef device) {
 
         CFRelease(options);
 
-        connect_and_start_session(device);
-        CFURLRef device_app_url = copy_device_app_url(device, install_bundle_id);
-        check_error(AMDeviceStopSession(device));
-        check_error(AMDeviceDisconnect(device));
-        CFStringRef device_app_path = CFURLCopyFileSystemPath(device_app_url, kCFURLPOSIXPathStyle);
-
         NSLogOut(@"[100%%] Installed package %@", [NSString stringWithUTF8String:app_path]);
-        NSLogVerbose(@"App path: %@", device_app_path);
-        NSLogJSON(@{@"Event": @"BundleInstall",
-                    @"OverallPercent": @(100),
-                    @"Percent": @(100),
-                    @"Status": @"Complete",
-                    @"Path": (__bridge NSString *)device_app_path
-                    });
+        if (install_bundle_id == NULL) {
+          NSLogJSON(@{@"Event": @"BundleInstall",
+                      @"OverallPercent": @(100),
+                      @"Percent": @(100),
+                      @"Status": @"Complete"
+                      });
+        } else {
+          connect_and_start_session(device);
+          CFURLRef device_app_url = copy_device_app_url(device, install_bundle_id);
+          check_error(AMDeviceStopSession(device));
+          check_error(AMDeviceDisconnect(device));
+          CFStringRef device_app_path = CFURLCopyFileSystemPath(device_app_url, kCFURLPOSIXPathStyle);
+          
+          NSLogVerbose(@"App path: %@", device_app_path);
+          NSLogJSON(@{@"Event": @"BundleInstall",
+                      @"OverallPercent": @(100),
+                      @"Percent": @(100),
+                      @"Status": @"Complete",
+                      @"Path": (__bridge NSString *)device_app_path
+                      });
 
-      CFRelease(device_app_url);
-      CFRelease(install_bundle_id);
-      CFRelease(device_app_path);
+          CFRelease(device_app_url);
+          CFRelease(install_bundle_id);
+          CFRelease(device_app_path);
+        }
     }
     CFRelease(path);
 
