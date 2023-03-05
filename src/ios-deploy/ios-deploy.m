@@ -2608,6 +2608,403 @@ void download_device_symbols(AMDeviceRef device) {
     CFRelease(dsc_extractor_bundle);
 }
 
+typedef struct {
+  uint32_t magic;
+  uint32_t cb;
+  uint16_t fragmentId;
+  uint16_t fragmentCount;
+  uint32_t length;
+  uint32_t identifier;
+  uint32_t conversationIndex;
+  uint32_t channelCode;
+  uint32_t expectsReply;
+} DTXMessageHeader;
+
+typedef struct {
+  uint32_t flags;
+  uint32_t auxiliaryLength;
+  uint64_t totalLength;
+} DTXMessagePayloadHeader;
+
+uint32_t instruments_current_message_id = 0;
+
+NSDictionary<NSString*, NSNumber*>* instruments_available_channels = nil;
+
+static const uint32 DTXMessageHeaderMagic = 0x1F3D5B79;
+static const uint64 DTXAuxillaryDataMagic = 0x1F0;
+
+static const uint32 EmptyDictionaryKey = 10;
+static const uint32 ObjectArgumentType = 2;
+static const uint32 Int32ArgumentType = 3;
+static const uint32 Int64ArgumentType = 4;
+
+NSData* instruments_object_argument(void * argument) {
+    NSError *error = nil;
+    NSData *argumentData = [NSKeyedArchiver archivedDataWithRootObject:argument];
+    if (error) {
+        on_error(@"Error communicating with the intruments server: %@", error);
+    }
+    uint32 argumentSize = (uint32) argumentData.length;
+    NSMutableData *data = NSMutableData.data;
+    [data appendBytes:&EmptyDictionaryKey length:sizeof(EmptyDictionaryKey)];
+    [data appendBytes:&ObjectArgumentType length:sizeof(ObjectArgumentType)];
+    [data appendBytes:&argumentSize length:sizeof(argumentSize)];
+    [data appendData:argumentData];
+    return data;
+}
+
+NSData* instruments_int32_argument(int32_t value) {
+    NSMutableData *data = NSMutableData.data;
+    [data appendBytes:&EmptyDictionaryKey length:sizeof(EmptyDictionaryKey)];
+    [data appendBytes:&Int32ArgumentType length:sizeof(Int32ArgumentType)];
+    [data appendBytes:&value length:sizeof(value)];
+    return data;
+}
+
+NSData* instruments_int64_argument(int64_t value) {
+    NSMutableData *data = NSMutableData.data;
+    [data appendBytes:&EmptyDictionaryKey length:sizeof(EmptyDictionaryKey)];
+    [data appendBytes:&Int64ArgumentType length:sizeof(Int64ArgumentType)];
+    [data appendBytes:&value length:sizeof(value)];
+    return data;
+}
+
+void instruments_send_message(int channel, NSString* selector, const NSArray<NSData*> *args, bool expects_reply) {
+    uint32_t id = ++instruments_current_message_id;
+
+    // Serialize arguments
+    NSMutableData *auxillaryData = NSMutableData.data;
+    if (args != nil) {
+        NSMutableData *argumentsData = NSMutableData.data;
+        for (NSData *argument in args) {
+            [argumentsData appendData:argument];
+        }
+
+        uint64 payloadLength = argumentsData.length;
+        [auxillaryData appendBytes:&DTXAuxillaryDataMagic length:sizeof(DTXAuxillaryDataMagic)];
+        [auxillaryData appendBytes:&payloadLength length:sizeof(payloadLength)];
+        [auxillaryData appendData:argumentsData];
+    }
+
+    // Serialize selector
+    NSError *error = nil;
+    NSData *selectorData = [NSKeyedArchiver archivedDataWithRootObject:selector];
+    if (error) {
+        on_error(@"Error communicating with the intruments server: %@", error);
+    }
+
+    // Prepare the message
+    DTXMessagePayloadHeader payloadHeader;
+    payloadHeader.flags = 0x2 | (expects_reply ? 0x1000 : 0);
+    payloadHeader.auxiliaryLength = (uint32) auxillaryData.length;
+    payloadHeader.totalLength = auxillaryData.length + selectorData.length;
+
+    DTXMessageHeader messageHeader;
+    messageHeader.magic = DTXMessageHeaderMagic;
+    messageHeader.cb = sizeof(DTXMessageHeader);
+    messageHeader.fragmentId = 0;
+    messageHeader.fragmentCount = 1;
+    messageHeader.length = (uint32_t)(sizeof(payloadHeader) + payloadHeader.totalLength);
+    messageHeader.identifier = id;
+    messageHeader.conversationIndex = 0;
+    messageHeader.channelCode = channel;
+    messageHeader.expectsReply = (expects_reply ? 1 : 0);
+
+    NSMutableData *data = NSMutableData.data;
+    [data appendBytes:&messageHeader length:sizeof(messageHeader)];
+    [data appendBytes:&payloadHeader length:sizeof(payloadHeader)];
+    [data appendData:auxillaryData];
+    [data appendData:selectorData];
+
+    // Send message
+    uint64_t bytes_sent = AMDServiceConnectionSend(dbgServiceConnection, data.bytes, data.length);
+    if (bytes_sent != data.length) {
+        on_error(@"Error communicating with instruments server");
+    }
+}
+
+NSArray<id>* instruments_parse_auxillary_data(NSData* data) {
+    if (data == nil) {
+        return nil;
+    }
+
+    if (data.length < 16) {
+        on_error(@"Insufficient data to parse");
+    }
+
+    uint64_t offset = sizeof(uint64_t);
+
+    uint64_t payloadLength;
+    [data getBytes:&payloadLength range:NSMakeRange(offset, sizeof(payloadLength))];
+    offset += sizeof(payloadLength);
+
+    uint64_t end = offset + payloadLength;
+
+    NSMutableArray<id> *arguments = NSMutableArray.array;
+
+    while (offset < end) {
+        uint32 type = 0;
+        [data getBytes:&type range:NSMakeRange(offset, sizeof(type))];
+        offset += sizeof(type);
+
+        uint32 length = 0;
+
+        id value = nil;
+
+        switch (type) {
+            case 2:
+                [data getBytes:&length range:NSMakeRange(offset, sizeof(length))];
+                offset += sizeof(length);
+                value = [NSKeyedUnarchiver unarchiveObjectWithData:[data subdataWithRange:NSMakeRange(offset, length)]];
+                break;
+            case 3:
+            case 5:
+            {
+                int32_t intValue;
+                [data getBytes:&intValue range:NSMakeRange(offset, sizeof(intValue))];
+                offset += sizeof(intValue);
+                value = [NSNumber numberWithInt:intValue];
+                break;
+            }
+            case 4:
+            case 6:
+            {
+                int64_t intValue;
+                [data getBytes:&intValue range:NSMakeRange(offset, sizeof(intValue))];
+                offset += sizeof(intValue);
+                value = [NSNumber numberWithLongLong:intValue];
+                break;
+            }
+            case 10:
+                // Empty dictionary value, ignore
+                continue;
+            default:
+                // Unknown
+                break;
+        }
+
+        if (value == nil) {
+            on_error(@"Error communicating with instruments server: Error parsing auxiliary data");
+        }
+        [arguments addObject:value];
+        offset += length;
+    }
+
+    return [arguments retain];
+}
+
+void instruments_receive_message(id* returnValue, NSArray<id>** auxillaryValues) {
+    NSMutableData *payloadData = NSMutableData.data;
+
+    DTXMessageHeader messageHeader;
+    do {
+        uint32_t bytes_read = AMDServiceConnectionReceive(dbgServiceConnection, &messageHeader, sizeof(messageHeader));
+        if (bytes_read != sizeof(messageHeader)) {
+            on_error(@"Error communicating with instruments server: Error in reading response");
+        }
+        if (messageHeader.magic != DTXMessageHeaderMagic) {
+            on_error(@"Error communicating with instruments server: Magic in response magic does not match");
+        }
+        if (messageHeader.conversationIndex == 0 && messageHeader.identifier < instruments_current_message_id) {
+            // New message with unexpected identifier
+            on_error(@"Error communicating with instruments server: response identifier %d is lower than the last request (%d)", messageHeader.identifier, instruments_current_message_id);
+        }
+        if (messageHeader.conversationIndex == 1 && messageHeader.identifier != instruments_current_message_id) {
+            // This is a response, but the message id does not match
+            on_error(@"Error communicating with instruments server: expected response to message id %d, got %d", instruments_current_message_id, messageHeader.identifier);
+        }
+
+        instruments_current_message_id = messageHeader.identifier;
+
+        if (messageHeader.fragmentId == 0 && messageHeader.fragmentCount > 1) {
+            // First message in multi-fragment message has only payload.
+            continue;
+        }
+
+        void *buffer = alloca(messageHeader.length);
+        void *buffer_current = buffer;
+        uint32_t remaining_bytes = messageHeader.length;
+        while (remaining_bytes > 0) {
+            uint32_t bytes_read = AMDServiceConnectionReceive(dbgServiceConnection, buffer_current, remaining_bytes);
+            if (bytes_read <= 0) {
+                on_error(@"Error communicating with instruments server: Error in reading response");
+            }
+
+            buffer_current += bytes_read;
+            remaining_bytes -= bytes_read;
+        }
+
+        [payloadData appendBytes:buffer length:messageHeader.length];
+    } while (messageHeader.fragmentId < messageHeader.fragmentCount - 1);
+
+    const DTXMessagePayloadHeader *payloadHeader = (const DTXMessagePayloadHeader *)payloadData.bytes;
+
+    if ((payloadHeader->flags & 0xFF000) >> 12) {
+        on_error(@"Error communicating with instruments server: Compression is not supported");
+    }
+
+    // serialized object array is located just after payload header
+    NSData* auxillaryData = nil;
+    if (payloadHeader->auxiliaryLength) {
+        auxillaryData = [payloadData subdataWithRange:NSMakeRange(sizeof(DTXMessagePayloadHeader), payloadHeader->auxiliaryLength)];
+    }
+    if (auxillaryValues != nil) {
+        *auxillaryValues = instruments_parse_auxillary_data(auxillaryData);
+    }
+
+    // archived payload object appears after the auxiliary array
+    size_t returnValueDataLength = payloadHeader->totalLength - payloadHeader->auxiliaryLength;
+    NSData* returnValueData = nil;
+    if (returnValueDataLength) {
+        returnValueData = [payloadData subdataWithRange:NSMakeRange(sizeof(DTXMessagePayloadHeader) + payloadHeader->auxiliaryLength, returnValueDataLength)];
+    }
+    if (returnValue != nil) {
+        *returnValue = [NSKeyedUnarchiver unarchiveObjectWithData:returnValueData];
+    }
+}
+
+void instruments_perform_handshake() {
+    NSDictionary* capabilities = @{
+        @"com.apple.private.DTXBlockCompression": @2,
+        @"com.apple.private.DTXConnection": @1
+    };
+
+    instruments_send_message(
+        0 /* channel */,
+        @"_notifyOfPublishedCapabilities:",
+        @[
+            instruments_object_argument(capabilities)
+        ] /* args */,
+        false /* expectes_reply */
+    );
+
+    id returnValue = nil;
+    NSArray<id>* auxillaryValues = nil;
+    instruments_receive_message(&returnValue, &auxillaryValues);
+
+    if (![returnValue isKindOfClass:NSString.class] || ![returnValue isEqualToString:@"_notifyOfPublishedCapabilities:"]) {
+        on_error(@"Error communicating with instruments server: unexpected response selector");
+    }
+
+    NSDictionary<NSString*, NSNumber*>* channels = auxillaryValues.firstObject;
+    if (![channels isKindOfClass:NSDictionary.class]) {
+        on_error(@"Error communicating with instruments server: unexpected channel list type");
+    }
+
+    instruments_available_channels = [channels retain];
+
+    [returnValue release];
+    [auxillaryValues release];
+}
+
+id instruments_perform_selector(int channel, NSString* selector, const NSArray<NSData*> *args) {
+    instruments_send_message(channel, selector, args, true /* expectes_reply */);
+
+    id returnValue = nil;
+    instruments_receive_message(&returnValue, nil);
+
+    return returnValue;
+}
+
+int32_t instruments_make_channel(NSString* identifier) {
+    if (![instruments_available_channels objectForKey:identifier]) {
+        on_error(@"Channel %@ not supported by the server", identifier);
+    }
+
+    static int32_t channel_id = 0;
+    int32_t code = ++channel_id;
+
+    id returnValue = instruments_perform_selector(
+        0 /* channel */,
+        @"_requestChannelWithCode:identifier:",
+        @[
+            instruments_int32_argument(code),
+            instruments_object_argument(identifier)
+        ]
+    );
+
+    if (returnValue != nil) {
+        on_error(@"Error: _requestChannelWithCode:identifier: returned %@", returnValue);
+    }
+
+    [returnValue release];
+
+    return code;
+}
+
+void instruments_connect_service(AMDeviceRef device) {
+    connect_and_start_session(device);
+    mount_developer_image(device);
+
+    // Check version similar to start_remote_debug_server
+    CFStringRef keys[] = { CFSTR("MinIPhoneVersion"), CFSTR("MinAppleTVVersion"), CFSTR("MinWatchVersion") };
+    CFStringRef values[] = { CFSTR("14.0"), CFSTR("14.0"), CFSTR("7.0") }; // Not sure about older watchOS versions
+    CFDictionaryRef version = CFDictionaryCreate(NULL, (const void **)&keys, (const void **)&values, 3, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+
+    bool useSecureProxy = AMDeviceIsAtLeastVersionOnPlatform(device, version);
+
+    // Start the instruments server
+    assert(dbgServiceConnection == NULL);
+    CFStringRef serviceName = useSecureProxy ? CFSTR("com.apple.instruments.remoteserver.DVTSecureSocketProxy") : CFSTR("com.apple.instruments.remoteserver");
+    check_error(AMDeviceSecureStartService(device, serviceName, NULL, &dbgServiceConnection));
+
+    assert(dbgServiceConnection != NULL);
+
+    if (!useSecureProxy)
+    {
+        disable_ssl(dbgServiceConnection);
+    }
+
+    check_error(AMDeviceStopSession(device));
+    check_error(AMDeviceDisconnect(device));
+}
+
+void list_processes(AMDeviceRef device) {
+    if (!instruments_available_channels) {
+        instruments_connect_service(device);
+        instruments_perform_handshake();
+    }
+
+    int32_t channel = instruments_make_channel(@"com.apple.instruments.server.services.deviceinfo");
+
+    id processes = instruments_perform_selector(channel, @"runningProcesses", nil /* args */);
+
+    if (processes == nil || ![processes isKindOfClass:NSArray.class]) {
+        on_error(@"Error: could not retrieve return value for runningProcesses");
+    }
+
+    if (_json_output) {
+        // NSDate cannot be serialized to JSON as is, manually convert it it NSString
+        NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+        [dateFormatter setDateFormat:@"yyyy'-'MM'-'dd'T'HH':'mm':'ss.SSS'Z'"];
+        [dateFormatter setTimeZone:[NSTimeZone timeZoneWithName:@"GMT"]];
+
+        NSMutableArray* processesCopy = NSMutableArray.array;
+        for (NSDictionary* proc in processes) {
+            NSMutableDictionary* procCopy = [NSMutableDictionary dictionaryWithDictionary:proc];
+
+            if (procCopy[@"startDate"] != nil) {
+                NSString *startDate = [dateFormatter stringFromDate:procCopy[@"startDate"]];
+                [procCopy removeObjectForKey:@"startDate"];
+                [procCopy setObject:startDate forKey:@"startDate"];
+            }
+
+            [processesCopy addObject:procCopy];
+        }
+
+        NSLogJSON(@{@"Event": @"ListProcesses",
+                    @"Processes": processesCopy});
+    }
+    else {
+        NSLogOut(@"PID\tNAME");
+        for (NSDictionary* proc in processes) {
+            NSLogOut(@"%@\t%@", proc[@"pid"], proc[@"name"]);
+        }
+    }
+
+    [processes release];
+}
+
 void handle_device(AMDeviceRef device) {
     NSLogVerbose(@"Already found device? %d", found_device);
 
@@ -2667,6 +3064,8 @@ void handle_device(AMDeviceRef device) {
             uninstall_app(device);
         } else if (strcmp("list_bundle_id", command) == 0) {
             list_bundle_id(device);
+        } else if (strcmp("list_processes", command) == 0) {
+            list_processes(device);
         } else if (strcmp("get_battery_level", command) == 0) {
             get_battery_level(device);
         } else if (strcmp("symbols", command) == 0) {
@@ -2934,6 +3333,7 @@ void usage(const char* app) {
         @"  -V, --version                print the executable version \n"
         @"  -e, --exists                 check if the app with given bundle_id is installed or not \n"
         @"  -B, --list_bundle_id         list bundle_id \n"
+        @"  --list_processes             list running processes \n"
         @"  -W, --no-wifi                ignore wifi devices\n"
         @"  -C, --get_battery_level      get battery current capacity \n"
         @"  -O, --output <file>          write stdout to this file\n"
@@ -3025,6 +3425,7 @@ int main(int argc, char *argv[]) {
 #if defined(IOS_DEPLOY_FEATURE_DEVELOPER_MODE)
         { "check-developer-mode", no_argument, NULL, 1008},
 #endif
+        { "list_processes", no_argument, NULL, 1009},
         { NULL, 0, NULL, 0 },
     };
     int ch;
@@ -3141,6 +3542,10 @@ int main(int argc, char *argv[]) {
         case 'B':
             command_only = true;
             command = "list_bundle_id";
+            break;
+        case 1009:
+            command_only = true;
+            command = "list_processes";
             break;
         case 'W':
             no_wifi = true;
