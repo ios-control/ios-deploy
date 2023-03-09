@@ -129,6 +129,7 @@ const char * custom_script_path = NULL;
 char *symbols_download_directory = NULL;
 char *profile_uuid = NULL;
 char *profile_path = NULL;
+int pid = -1;
 int _timeout = 0;
 int _detectDeadlockTimeout = 0;
 bool _json_output = false;
@@ -3084,6 +3085,31 @@ void get_pid(AMDeviceRef device) {
                 @"pid": pid});
 }
 
+void kill_app(AMDeviceRef device) {
+    if (bundle_id == NULL && pid <= 0) {
+        on_error(@"Error: must specify either --pid or --bundle_id");
+    }
+
+    instruments_connect_service(device);
+    instruments_perform_handshake();
+
+    NSNumber* ns_pid = [NSNumber numberWithInt:pid];
+    if (![ns_pid isGreaterThan:@0]) {
+        CFStringRef cf_bundle_id = CFAutorelease(CFStringCreateWithCString(NULL, bundle_id, kCFStringEncodingUTF8));
+        ns_pid = pid_for_bundle_id((NSString*)cf_bundle_id);
+
+        if (![ns_pid isGreaterThan:@0]) {
+            NSLogOut(@"Could not find pid for bundle '%@'. Nothing to kill.", cf_bundle_id);
+            return;
+        }
+    }
+
+    int32_t channel = instruments_make_channel(@"com.apple.instruments.server.services.processcontrol");
+
+    instruments_send_message(channel, @"killPid:", @[instruments_object_argument(ns_pid)], false /* expectes_reply */);
+    [ns_pid release];
+}
+
 void list_processes(AMDeviceRef device) {
     instruments_connect_service(device);
     instruments_perform_handshake();
@@ -3102,7 +3128,7 @@ void list_processes(AMDeviceRef device) {
 
         NSMutableArray* filteredProcesses = NSMutableArray.array;
 
-        if (pid > 0) {
+        if ([pid isGreaterThan:@0]) {
             for (NSDictionary* proc in processes) {
                 NSNumber* procPid = proc[@"pid"];
                 if (procPid == pid) {
@@ -3226,6 +3252,8 @@ void handle_device(AMDeviceRef device) {
         } else if (strcmp("check_developer_mode", command) == 0) {
             check_developer_mode(device);
 #endif
+        } else if (strcmp("kill_app", command) == 0) {
+            kill_app(device);
         }
         exit(0);
     }
@@ -3507,6 +3535,8 @@ void usage(const char* app) {
         @"  -B, --list_bundle_id         list bundle_id \n"
         @"  --list_processes             list running processes \n"
         @"  --get_pid                    get process id for the bundle. must specify --bundle_id\n"
+        @"  --pid <pid>                  specify pid, to be used with --kill\n"
+        @"  --kill                       kill a process. must specify either --pid or --bundle_id\n"
         @"  -W, --no-wifi                ignore wifi devices\n"
         @"  -C, --get_battery_level      get battery current capacity \n"
         @"  -O, --output <file>          write stdout to this file\n"
@@ -3526,10 +3556,9 @@ void usage(const char* app) {
         @"  --profile-install <file>     install a provisioning profile\n"
         @"  --profile-uninstall          uninstall a provisioning profile (requires --profile-uuid <UUID>)\n"
 #if defined(IOS_DEPLOY_FEATURE_DEVELOPER_MODE)
-        @"  --check-developer-mode       checks whether the given device has developer mode enabled (requires Xcode 14 or newer)\n",
-#else
-        ,
+        @"  --check-developer-mode       checks whether the given device has developer mode enabled (requires Xcode 14 or newer)\n"
 #endif
+        ,
         [NSString stringWithUTF8String:app]);
 }
 
@@ -3600,6 +3629,8 @@ int main(int argc, char *argv[]) {
 #endif
         { "list_processes", no_argument, NULL, 1009},
         { "get_pid", no_argument, NULL, 1010},
+        { "pid", required_argument, NULL, 1011},
+        { "kill", no_argument, NULL, 1012},
         { NULL, 0, NULL, 0 },
     };
     int ch;
@@ -3796,6 +3827,13 @@ int main(int argc, char *argv[]) {
         case 'k':
             if (!keys) keys = [[NSMutableArray alloc] init];
             [keys addObject: [NSString stringWithUTF8String:optarg]];
+            break;
+        case 1011:
+            pid = atoi(optarg);
+            break;
+        case 1012:
+            command_only = true;
+            command = "kill_app";
             break;
         default:
             usage(argv[0]);
