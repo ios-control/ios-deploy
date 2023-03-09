@@ -2128,6 +2128,19 @@ void list_bundle_id(AMDeviceRef device)
     CFDictionaryRef result = nil;
     check_error(AMDeviceLookupApplications(device, options, &result));
 
+    if (bundle_id != NULL) {
+        CFStringRef cf_bundle_id = CFAutorelease(CFStringCreateWithCString(NULL, bundle_id, kCFStringEncodingUTF8));
+        CFDictionaryRef app_dict = CFRetain(CFDictionaryGetValue(result, cf_bundle_id));
+
+        CFRelease(result);
+        result = CFAutorelease(CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+
+        if (app_dict != NULL) {
+            CFDictionaryAddValue((CFMutableDictionaryRef)result, cf_bundle_id, app_dict);
+            CFRelease(app_dict);
+        }
+    }
+
     if (_json_output) {
         NSLogJSON(@{@"Event": @"ListBundleId",
                     @"Apps": (NSDictionary *)result});
@@ -3041,11 +3054,39 @@ void instruments_connect_service(AMDeviceRef device) {
     check_error(AMDeviceDisconnect(device));
 }
 
-void list_processes(AMDeviceRef device) {
-    if (!instruments_available_channels) {
-        instruments_connect_service(device);
-        instruments_perform_handshake();
+NSNumber* pid_for_bundle_id(NSString* bundle_id) {
+    int32_t channel = instruments_make_channel(@"com.apple.instruments.server.services.processcontrol");
+
+    id pid = instruments_perform_selector(channel, @"processIdentifierForBundleIdentifier:", @[instruments_object_argument(bundle_id)]);
+
+    if (pid != nil && ![pid isKindOfClass:NSNumber.class]) {
+        on_error(@"Error: did not get valid response from processIdentifierForBundleIdentifier:");
     }
+
+    // Return -1 if pid is not found
+    return (pid == nil || [pid isEqualToNumber:@0]) ? @-1 : pid;
+}
+
+void get_pid(AMDeviceRef device) {
+    if (bundle_id == NULL) {
+        on_error(@"Error: bundle id required, please specify with --bundle_id.");
+    }
+
+    instruments_connect_service(device);
+    instruments_perform_handshake();
+
+    CFStringRef cf_bundle_id = CFAutorelease(CFStringCreateWithCString(NULL, bundle_id, kCFStringEncodingUTF8));
+
+    NSNumber* pid = pid_for_bundle_id((NSString*)cf_bundle_id);
+
+    NSLogOut(@"pid: %@", pid);
+    NSLogJSON(@{@"Event": @"GetPid",
+                @"pid": pid});
+}
+
+void list_processes(AMDeviceRef device) {
+    instruments_connect_service(device);
+    instruments_perform_handshake();
 
     int32_t channel = instruments_make_channel(@"com.apple.instruments.server.services.deviceinfo");
 
@@ -3053,6 +3094,25 @@ void list_processes(AMDeviceRef device) {
 
     if (processes == nil || ![processes isKindOfClass:NSArray.class]) {
         on_error(@"Error: could not retrieve return value for runningProcesses");
+    }
+
+    if (bundle_id != NULL) {
+        CFStringRef cf_bundle_id = CFAutorelease(CFStringCreateWithCString(NULL, bundle_id, kCFStringEncodingUTF8));
+        NSNumber* pid = pid_for_bundle_id((NSString*)cf_bundle_id);
+
+        NSMutableArray* filteredProcesses = NSMutableArray.array;
+
+        if (pid > 0) {
+            for (NSDictionary* proc in processes) {
+                NSNumber* procPid = proc[@"pid"];
+                if (procPid == pid) {
+                    [filteredProcesses addObject:proc];
+                }
+            }
+        }
+
+        [processes release];
+        processes = filteredProcesses;
     }
 
     if (_json_output) {
@@ -3148,6 +3208,8 @@ void handle_device(AMDeviceRef device) {
             list_bundle_id(device);
         } else if (strcmp("list_processes", command) == 0) {
             list_processes(device);
+        } else if (strcmp("get_pid", command) == 0) {
+            get_pid(device);
         } else if (strcmp("get_battery_level", command) == 0) {
             get_battery_level(device);
         } else if (strcmp("symbols", command) == 0) {
@@ -3444,6 +3506,7 @@ void usage(const char* app) {
         @"  -e, --exists                 check if the app with given bundle_id is installed or not \n"
         @"  -B, --list_bundle_id         list bundle_id \n"
         @"  --list_processes             list running processes \n"
+        @"  --get_pid                    get process id for the bundle. must specify --bundle_id\n"
         @"  -W, --no-wifi                ignore wifi devices\n"
         @"  -C, --get_battery_level      get battery current capacity \n"
         @"  -O, --output <file>          write stdout to this file\n"
@@ -3536,6 +3599,7 @@ int main(int argc, char *argv[]) {
         { "check-developer-mode", no_argument, NULL, 1008},
 #endif
         { "list_processes", no_argument, NULL, 1009},
+        { "get_pid", no_argument, NULL, 1010},
         { NULL, 0, NULL, 0 },
     };
     int ch;
@@ -3656,6 +3720,10 @@ int main(int argc, char *argv[]) {
         case 1009:
             command_only = true;
             command = "list_processes";
+            break;
+        case 1010:
+            command_only = true;
+            command = "get_pid";
             break;
         case 'W':
             no_wifi = true;
