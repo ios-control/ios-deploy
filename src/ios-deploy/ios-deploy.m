@@ -129,7 +129,7 @@ const char * custom_script_path = NULL;
 char *symbols_download_directory = NULL;
 char *profile_uuid = NULL;
 char *profile_path = NULL;
-int pid = -1;
+int command_pid = -1;
 int _timeout = 0;
 int _detectDeadlockTimeout = 0;
 bool _json_output = false;
@@ -3086,14 +3086,14 @@ void get_pid(AMDeviceRef device) {
 }
 
 void kill_app(AMDeviceRef device) {
-    if (bundle_id == NULL && pid <= 0) {
+    if (bundle_id == NULL && command_pid <= 0) {
         on_error(@"Error: must specify either --pid or --bundle_id");
     }
 
     instruments_connect_service(device);
     instruments_perform_handshake();
 
-    NSNumber* ns_pid = [NSNumber numberWithInt:pid];
+    NSNumber* ns_pid = [NSNumber numberWithInt:command_pid];
     if (![ns_pid isGreaterThan:@0]) {
         CFStringRef cf_bundle_id = CFAutorelease(CFStringCreateWithCString(NULL, bundle_id, kCFStringEncodingUTF8));
         ns_pid = pid_for_bundle_id((NSString*)cf_bundle_id);
@@ -3829,7 +3829,7 @@ int main(int argc, char *argv[]) {
             [keys addObject: [NSString stringWithUTF8String:optarg]];
             break;
         case 1011:
-            pid = atoi(optarg);
+            command_pid = atoi(optarg);
             break;
         case 1012:
             command_only = true;
