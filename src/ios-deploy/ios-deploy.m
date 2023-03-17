@@ -1512,7 +1512,10 @@ void setup_lldb(AMDeviceRef device, CFURLRef url) {
         NSLogOut(@"[100%%] Listening for lldb connections");
     }
     else {
-        create_remote_debug_server_socket(0, device);   // start debugserver
+        int connection_id = 0;
+        CFNumberRef cf_connection_id = CFAutorelease(CFNumberCreate(NULL, kCFNumberIntType, &connection_id));
+
+        create_remote_debug_server_socket(cf_connection_id, device);   // start debugserver
         write_lldb_prep_cmds(device, url);   // dump the necessary lldb commands into a file
         NSLogOut(@"[100%%] Connecting to remote debug server");
     }
