@@ -179,7 +179,7 @@
 				Base,
 			);
 			mainGroup = 7E7089851B587BF3004D23AA;
-			productRefGroup = 7E70898F1B587BF3004D23AA /* Products */;
+			productRefGroup = 7E7089851B587BF3004D23AA /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
