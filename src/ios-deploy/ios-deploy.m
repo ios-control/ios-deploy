@@ -3113,6 +3113,28 @@ void kill_app(AMDeviceRef device) {
     [ns_pid release];
 }
 
+void launch_app(AMDeviceRef device) {
+    if (bundle_id == NULL ) {
+        on_error(@"Error: bundle id is required, please specify with --bundle_id");
+    }
+
+    instruments_connect_service(device);
+    instruments_perform_handshake();
+    
+    CFStringRef cf_bundle_id = CFAutorelease(CFStringCreateWithCString(NULL, bundle_id, kCFStringEncodingUTF8));
+    NSDictionary *options = @{@"StartSuspendedKey" : @NO, @"KillExisting" : @YES };
+        
+    int32_t channel = instruments_make_channel(@"com.apple.instruments.server.services.processcontrol");
+    
+    instruments_send_message(channel, @"launchSuspendedProcessWithDevicePath:bundleIdentifier:environment:arguments:options:", @[
+        instruments_object_argument(@""),
+        instruments_object_argument((NSString*)cf_bundle_id),
+        instruments_object_argument(@{}),
+        instruments_object_argument(@[]),
+        instruments_object_argument(options)
+    ], false);
+}
+
 void list_processes(AMDeviceRef device) {
     instruments_connect_service(device);
     instruments_perform_handshake();
@@ -3257,6 +3279,8 @@ void handle_device(AMDeviceRef device) {
 #endif
         } else if (strcmp("kill_app", command) == 0) {
             kill_app(device);
+        } else if (strcmp("launch_app", command) == 0) {
+            launch_app(device);
         }
         exit(0);
     }
@@ -3540,6 +3564,7 @@ void usage(const char* app) {
         @"  --get_pid                    get process id for the bundle. must specify --bundle_id\n"
         @"  --pid <pid>                  specify pid, to be used with --kill\n"
         @"  --kill                       kill a process. must specify either --pid or --bundle_id\n"
+        @"  --launch                     launch a process by bundle id. must specify -bundle_id\n"
         @"  -W, --no-wifi                ignore wifi devices\n"
         @"  -C, --get_battery_level      get battery current capacity \n"
         @"  -O, --output <file>          write stdout to this file\n"
@@ -3634,6 +3659,7 @@ int main(int argc, char *argv[]) {
         { "get_pid", no_argument, NULL, 1010},
         { "pid", required_argument, NULL, 1011},
         { "kill", no_argument, NULL, 1012},
+        { "launch", no_argument, NULL, 1013},
         { NULL, 0, NULL, 0 },
     };
     int ch;
@@ -3837,6 +3863,10 @@ int main(int argc, char *argv[]) {
         case 1012:
             command_only = true;
             command = "kill_app";
+            break;
+        case 1013:
+            command_only = true;
+            command = "launch_app";
             break;
         default:
             usage(argv[0]);
