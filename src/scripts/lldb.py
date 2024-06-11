@@ -169,13 +169,21 @@ def autoexit_command(debugger, command, result, internal_dict):
             CloseOut()
             os._exit(process.GetExitStatus())
         elif printBacktraceTime is None and state == lldb.eStateStopped:
-            selectedThread = process.GetSelectedThread()
-            if selectedThread.GetStopReason() == lldb.eStopReasonNone:
-                # During startup there are some stops for lldb to setup properly.
-                # On iOS-16 we receive them with stop reason none.
-                continue
+            haveException = False
+            allThreads = process.get_process_thread_list()
+            for thread in allThreads:
+                if(thread.GetStopReason() == lldb.eStopReasonException):
+                    haveException = True
+                    print_stacktrace(thread)
+            if haveException == False:
+                selectedThread = process.GetSelectedThread()
+                if selectedThread.GetStopReason() == lldb.eStopReasonNone:
+                    # During startup there are some stops for lldb to setup properly.
+                    # On iOS-16 we receive them with stop reason none.
+                    continue
+                else:
+                    print_stacktrace(selectedThread)
             sys.stdout.write( '\\nPROCESS_STOPPED\\n' )
-            print_stacktrace(process.GetSelectedThread())
             CloseOut()
             os._exit({exitcode_app_crash})
         elif state == lldb.eStateCrashed:
